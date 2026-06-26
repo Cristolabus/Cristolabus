@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Life OS — Personal Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">⚡</div>
+        <div class="brand-text">
+          <div class="brand-name">Life OS</div>
+          <div class="brand-sub">Personal Dashboard</div>
+        </div>
+      </div>
+
+      <div class="player-card" id="playerCard">
+        <div class="player-avatar" id="playerAvatar">🧗</div>
+        <div class="player-meta">
+          <div class="player-name" id="playerName">Cristóbal</div>
+          <div class="player-title" id="playerTitle">Novice</div>
+        </div>
+        <div class="level-badge"><span id="playerLevel">1</span></div>
+      </div>
+
+      <div class="xp-wrap">
+        <div class="xp-row">
+          <span class="xp-label">Level <b id="xpLevel">1</b></span>
+          <span class="xp-num"><span id="xpCurrent">0</span> / <span id="xpNeeded">100</span> XP</span>
+        </div>
+        <div class="xp-bar"><div class="xp-fill" id="xpFill"></div></div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-btn active" data-view="overview"><span>🏠</span> Overview</button>
+        <button class="nav-btn" data-view="habits"><span>🔥</span> Habits &amp; Discipline</button>
+        <button class="nav-btn" data-view="tasks"><span>✅</span> Tasks</button>
+        <button class="nav-btn" data-view="calendar"><span>📅</span> Calendar</button>
+        <button class="nav-btn" data-view="finance"><span>💰</span> Finance</button>
+        <button class="nav-btn" data-view="health"><span>❤️</span> Health</button>
+        <button class="nav-btn" data-view="notes"><span>📝</span> Notes</button>
+        <button class="nav-btn" data-view="achievements"><span>🏆</span> Achievements</button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <button class="ghost-btn" id="exportBtn">⬇ Export</button>
+        <button class="ghost-btn" id="importBtn">⬆ Import</button>
+        <input type="file" id="importFile" accept="application/json" hidden />
+        <button class="ghost-btn danger" id="resetBtn">↺ Reset</button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="greeting">Good day</h1>
+          <p class="topbar-sub" id="dateLine"></p>
+        </div>
+        <div class="topbar-stats">
+          <div class="stat-pill"><span class="stat-ico">🔥</span><b id="topStreak">0</b> day streak</div>
+          <div class="stat-pill"><span class="stat-ico">💎</span><b id="topPoints">0</b> XP today</div>
+          <div class="stat-pill score" id="disciplinePill"><span class="stat-ico">🎯</span><b id="topDiscipline">0</b>% discipline</div>
+        </div>
+      </header>
+
+      <section id="viewRoot" class="view-root"></section>
+    </main>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toasts" class="toasts"></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
