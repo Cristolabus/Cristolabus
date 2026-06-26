@@ -2,53 +2,97 @@
 
 A gamified dashboard for running your personal life: discipline & consistency
 tracking, habits, tasks, calendar, finance, health, and notes — with an XP/level
-system, streaks, and achievements to keep you motivated.
+system, streaks, achievements, an **Admin panel** for full control, and an
+optional **Node + SQLite backend** so your data lives on a server, not just one
+browser.
 
-## Open it
+## Two ways to run it
 
-No build step, no dependencies. Just open `index.html` in your browser:
+### 1. Quick & offline (no install)
+
+Just open the file — data is saved in your browser (`localStorage`):
 
 ```bash
-# from this folder
-xdg-open index.html   # Linux
-open index.html       # macOS
-# or double-click the file
+xdg-open public/index.html   # Linux
+open public/index.html       # macOS
+# or double-click public/index.html
 ```
 
-All your data is saved locally in your browser (`localStorage`). Use the
-**Export / Import** buttons in the sidebar to back up or move your data.
+In offline mode the Admin panel needs no login.
+
+### 2. With the server + database (recommended)
+
+Stores everything in a SQLite database and protects edits with an admin login.
+
+```bash
+npm install
+npm start
+# open http://localhost:3000
+```
+
+Configure with environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `3000` | Port to serve on |
+| `ADMIN_PASSWORD` | `admin` | Password for the Admin panel login |
+| `LIFEOS_DATA_DIR` | `./data` | Where the SQLite file is stored |
+
+```bash
+ADMIN_PASSWORD=mySecret PORT=8080 npm start
+```
+
+The app auto-detects which mode it's in and shows the status in **Admin → Backend**.
 
 ## What's inside
 
 | Section | What it does |
 |---|---|
 | 🏠 **Overview** | Daily snapshot: streak, discipline %, level, priority tasks & next events |
-| 🔥 **Habits & Discipline** | Check off daily habits, build streaks, 30-day consistency heatmap |
+| 🔥 **Habits & Discipline** | Check off habits, build streaks, 30-day consistency heatmap, inline delete |
 | ✅ **Tasks** | Prioritized to-dos; completing them earns XP |
 | 📅 **Calendar** | Upcoming events grouped by day |
 | 💰 **Finance** | Monthly budgets with spend tracking and progress bars |
 | ❤️ **Health** | Sleep, steps, water, weight vs. goals |
 | 📝 **Notes** | Quick journal / scratchpad |
 | 🏆 **Achievements** | Unlockable badges for milestones |
+| ⚙️ **Admin** | Login, edit profile/currency/income, tune XP rules & streak threshold, full add/edit/delete for habits, tasks, budgets, health metrics & events, export backup, wipe & reset |
 
 ## The gamification system
 
-- **XP & Levels** — every habit, task, note, and met goal awards XP. Fill the bar to level up and earn new titles (Novice → Apprentice → … → Legend).
-- **Discipline score** — % of today's habits completed. A day counts toward your streak at **60%+**.
+- **XP & Levels** — every habit, task, note, and met goal awards XP. Fill the bar to level up and earn new titles (Novice → Apprentice → … → Legend). All XP values are editable in Admin.
+- **Discipline score** — % of today's habits completed. The threshold a day needs to count toward your streak is configurable (default **60%**).
 - **Streaks** — consecutive qualifying days, shown per-habit and overall.
 - **Achievements** — 10 unlockable badges (Perfect Day, Unstoppable, Iron Will, …).
 
-## Connecting real data (Google Calendar, Notion, etc.)
+## REST API (server mode)
 
-The app is self-contained and offline-first. To pull in **live** data from your
-real accounts, a Claude Code session can read your Google Calendar / Notion via
-its connected integrations and regenerate the `events` / `tasks` arrays in
-`data.js` — then you Import the result. A true always-on live sync would require
-hosting an OAuth backend, which is overkill for a personal tool.
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/health` | — | `{ ok, hasState }` |
+| `POST` | `/api/login` | — | Body `{ password }` → `{ token }` |
+| `GET` | `/api/state` | — | Full dashboard state (`204` if none yet) |
+| `PUT` | `/api/state` | Bearer | Save full state |
+| `DELETE` | `/api/state` | Bearer | Wipe state |
+
+The frontend caches to `localStorage` too, so a brief server hiccup never loses data.
 
 ## Files
 
-- `index.html` — layout & shell
-- `styles.css` — theme & components
-- `data.js` — default seed data (first run only)
-- `app.js` — gamification engine, views, persistence
+```
+server/
+  index.js     Express server + REST API + static hosting
+  db.js        SQLite persistence (better-sqlite3)
+public/
+  index.html   layout & shell
+  styles.css   theme & components
+  data.js      default seed data (first run only)
+  store.js     storage/sync layer (server ↔ localStorage)
+  app.js       gamification engine, views, Admin panel
+```
+
+## Connecting real data (Google Calendar, Notion, etc.)
+
+A Claude Code session can read your Google Calendar / Notion via its connected
+integrations and regenerate the seed `events` / `tasks` — then Import them, or
+have it `PUT` straight to `/api/state`.

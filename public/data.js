@@ -16,6 +16,13 @@ const SEED = {
     createdAt: todayISO(),
   },
 
+  // Tunable rules for the gamification engine (editable in the Admin panel).
+  settings: {
+    streakThreshold: 60,   // % of habits done for a day to count toward streak
+    noteXP: 5,             // XP for saving a note
+    goalXP: 15,            // XP for hitting a health goal
+  },
+
   // Daily discipline log: { "2026-06-26": { habits: {habitId: true}, xpEarned: 40 } }
   log: {},
 

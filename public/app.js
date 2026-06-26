@@ -1,20 +1,31 @@
 /* ===== Life OS — Application logic ===== */
 "use strict";
 
-const STORE_KEY = "lifeos.state";
-
 /* ---------- State management ---------- */
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { console.warn("load failed", e); }
-  return structuredClone(SEED);
+function ensureSettings() {
+  if (!S.settings) S.settings = { streakThreshold: 60, noteXP: 5, goalXP: 15 };
 }
+// Backfill any missing top-level structures so a partial/old saved state
+// can never crash the UI.
+function normalizeState() {
+  if (!S || typeof S !== "object") S = structuredClone(SEED);
+  for (const key of ["profile", "log", "habits", "tasks", "events", "finance", "health", "notes", "settings"]) {
+    if (S[key] === undefined || S[key] === null) S[key] = structuredClone(SEED[key]);
+  }
+  if (!S.finance.budgets) S.finance.budgets = [];
+  if (!S.health.metrics) S.health.metrics = [];
+  if (!S.profile.level) S.profile.level = 1;
+  if (S.profile.xp === undefined) S.profile.xp = 0;
+  if (!S.profile.name) S.profile.name = "Friend";
+  if (!S.profile.avatar) S.profile.avatar = "🧗";
+  ensureSettings();
+}
+// Persist: caches locally and (when logged in) syncs to the SQLite backend.
 function saveState() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(S));
+  ensureSettings();
+  Store.save(S);
 }
-let S = loadState();
+let S = structuredClone(SEED);   // replaced by Store.load() during setup()
 let currentView = "overview";
 
 /* ---------- XP / level curve ---------- */
@@ -79,8 +90,9 @@ function dayDisciplinePct(iso) {
 }
 function todayDisciplinePct() { return dayDisciplinePct(todayISO()); }
 
-// A day "counts" for the streak if at least 60% of habits were done.
-const STREAK_THRESHOLD = 60;
+// A day "counts" for the streak if at least N% of habits were done.
+// Synced from S.settings at the start of every render().
+let STREAK_THRESHOLD = 60;
 function currentStreak() {
   let streak = 0;
   let d = new Date();
@@ -163,6 +175,8 @@ function fmtDate(iso) {
 
 /* ================= RENDERING ================= */
 function render() {
+  ensureSettings();
+  STREAK_THRESHOLD = S.settings.streakThreshold || 60;
   renderSidebar();
   renderTopbar();
   const root = document.getElementById("viewRoot");
@@ -377,6 +391,123 @@ const VIEWS = {
       </div>
     `;
   },
+
+  admin() {
+    const online = Store.isOnline();
+    const authed = Store.isAuthed();
+    const locked = online && !authed;
+
+    let html = `<h2 class="section-title">⚙️ Admin &amp; Settings</h2>`;
+
+    // ---- backend / auth status ----
+    html += `<div class="card"><h2>🔌 Backend <span class="h-spacer"></span>
+      <span class="badge ${online ? "on" : "off"}">${online ? "Server connected" : "Offline — local only"}</span></h2>`;
+    if (online && authed) {
+      html += `<div class="row"><p class="muted" style="font-size:13px;flex:1">Admin logged in — every change syncs to the SQLite database.</p>
+        <button class="btn sm soft" id="logoutBtn">Log out</button></div>`;
+    } else if (online) {
+      html += `<div class="login-box">
+        <div class="field"><label>Admin password</label><input class="input" id="adminPw" type="password" placeholder="Enter admin password" /></div>
+        <button class="btn" id="loginBtn">Log in</button>
+        <p class="muted" style="font-size:12px;margin-top:8px">Default is <b>admin</b> (set <code>ADMIN_PASSWORD</code> on the server to change). The dashboard is read-only until you log in.</p>
+      </div>`;
+    } else {
+      html += `<p class="muted" style="font-size:13px">No server detected — you're editing local browser data. Run <code>npm start</code> for database-backed storage with login.</p>`;
+    }
+    html += `</div>`;
+
+    if (locked) return html + `<div class="empty">🔒 Log in above to manage your data.</div>`;
+
+    // ---- profile & rules ----
+    html += `<div class="card"><h2>👤 Profile &amp; Rules</h2>
+      <div class="grid cols-2">
+        <div class="field"><label>Name</label><input class="input" id="setName" value="${esc(S.profile.name)}"></div>
+        <div class="field"><label>Avatar emoji</label><input class="input" id="setAvatar" value="${esc(S.profile.avatar)}"></div>
+        <div class="field"><label>Timezone</label><input class="input" id="setTz" value="${esc(S.profile.timezone || "")}"></div>
+        <div class="field"><label>Currency code (e.g. CLP, USD, EUR)</label><input class="input" id="setCurrency" value="${esc(S.finance.currency)}"></div>
+        <div class="field"><label>Monthly income</label><input class="input" id="setIncome" type="number" value="${S.finance.monthlyIncome}"></div>
+        <div class="field"><label>Streak threshold (%)</label><input class="input" id="setThreshold" type="number" value="${S.settings.streakThreshold}"></div>
+        <div class="field"><label>Note XP</label><input class="input" id="setNoteXP" type="number" value="${S.settings.noteXP}"></div>
+        <div class="field"><label>Goal XP</label><input class="input" id="setGoalXP" type="number" value="${S.settings.goalXP}"></div>
+      </div>
+      <button class="btn" id="saveSettings">Save settings</button>
+    </div>`;
+
+    // ---- habits ----
+    html += `<div class="card"><h2>🔥 Manage Habits</h2>
+      <div class="admin-grid admin-head"><span></span><span>Name</span><span>Icon</span><span>XP</span><span></span></div>
+      <div id="habitRows">` +
+      S.habits.map(h => `<div class="admin-grid" data-id="${h.id}">
+        <div class="habit-ico">${h.ico}</div>
+        <input class="input" data-h-name value="${esc(h.name)}">
+        <input class="input mini" data-h-ico value="${esc(h.ico)}">
+        <input class="input mini" data-h-xp type="number" value="${h.xp}">
+        <button class="icon-btn" data-delhabit="${h.id}" title="Delete">✕</button>
+      </div>`).join("") + `</div>
+      <div class="row wrap" style="margin-top:12px">
+        <input class="input" id="ahName" placeholder="New habit name" style="flex:1;min-width:140px">
+        <input class="input" id="ahIco" placeholder="✨" style="width:70px">
+        <input class="input" id="ahXp" type="number" placeholder="XP" style="width:80px">
+        <button class="btn soft" id="addHabitAdmin">Add</button>
+        <button class="btn" id="saveHabits">Save all</button>
+      </div>
+    </div>`;
+
+    // ---- tasks ----
+    html += `<div class="card"><h2>✅ Manage Tasks</h2>` +
+      (S.tasks.length ? S.tasks.map(t => `<div class="admin-row" data-id="${t.id}">
+        <div>${t.done ? "✅" : "⬜"}</div>
+        <input class="input" data-t-title value="${esc(t.title)}">
+        <button class="icon-btn" data-deltask="${t.id}">✕</button>
+      </div>`).join("") : `<div class="empty">No tasks.</div>`) +
+      `<div class="row" style="margin-top:12px"><button class="btn soft" id="clearDone">Clear completed</button><button class="btn" id="saveTasks">Save titles</button></div>
+    </div>`;
+
+    // ---- budgets ----
+    html += `<div class="card"><h2>💰 Manage Budgets</h2>
+      <div class="admin-grid admin-head"><span></span><span>Category</span><span>Limit</span><span>Spent</span><span></span></div>` +
+      S.finance.budgets.map(b => `<div class="admin-grid" data-id="${b.id}">
+        <input class="input mini" data-b-ico value="${esc(b.ico || "")}" style="width:48px">
+        <input class="input" data-b-name value="${esc(b.name)}">
+        <input class="input mini" data-b-limit type="number" value="${b.limit}">
+        <input class="input mini" data-b-spent type="number" value="${b.spent}">
+        <button class="icon-btn" data-delbudget="${b.id}">✕</button>
+      </div>`).join("") +
+      `<button class="btn" id="saveBudgets" style="margin-top:12px">Save budgets</button>
+    </div>`;
+
+    // ---- health ----
+    html += `<div class="card"><h2>❤️ Manage Health Metrics</h2>` +
+      S.health.metrics.map(m => `<div class="admin-grid" data-id="${m.id}" style="grid-template-columns:48px 1.4fr 70px 70px 60px auto">
+        <input class="input mini" data-m-ico value="${esc(m.ico || "")}" style="width:48px">
+        <input class="input" data-m-name value="${esc(m.name)}">
+        <input class="input mini" data-m-value type="number" value="${m.value}">
+        <input class="input mini" data-m-goal type="number" value="${m.goal}">
+        <input class="input mini" data-m-unit value="${esc(m.unit || "")}" style="width:50px">
+        <button class="icon-btn" data-delmetric="${m.id}">✕</button>
+      </div>`).join("") +
+      `<button class="btn" id="saveHealth" style="margin-top:12px">Save metrics</button>
+    </div>`;
+
+    // ---- events ----
+    html += `<div class="card"><h2>📅 Manage Events</h2>` +
+      (S.events.length ? S.events.map(e => `<div class="admin-row" data-id="${e.id}">
+        <div>📅</div>
+        <div><b>${esc(e.title)}</b> <span class="muted">${e.date} ${e.time || ""}</span></div>
+        <button class="icon-btn" data-delevent="${e.id}">✕</button>
+      </div>`).join("") : `<div class="empty">No events.</div>`) + `</div>`;
+
+    // ---- danger zone ----
+    html += `<div class="card danger-zone"><h2>⚠️ Danger Zone</h2>
+      <div class="row wrap">
+        <button class="btn soft" id="adminExport">⬇ Export backup</button>
+        <button class="ghost-btn danger" id="wipeAll" style="flex:0 0 auto;min-width:160px">Wipe all data &amp; reset</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:10px">Wipe erases ${online ? "the database" : "local data"} and resets everything to defaults.</p>
+    </div>`;
+
+    return html;
+  },
 };
 
 /* ---------- HTML fragments ---------- */
@@ -396,6 +527,7 @@ function habitListHTML(compact) {
       </div>
       <div class="streak-chip">${st > 0 ? "🔥 " + st : ""}</div>
       <button class="check ${done ? "done" : ""}" data-habit="${h.id}">✓</button>
+      ${compact ? "" : `<button class="icon-btn" data-delhabit="${h.id}" title="Delete habit">✕</button>`}
     </div>`;
   }).join("");
 }
@@ -545,7 +677,7 @@ function bindViewEvents() {
     const wasHit = m.dir === "down" ? m.value <= m.goal : m.value >= m.goal;
     m.value = parseFloat(v) || 0;
     const nowHit = m.dir === "down" ? m.value <= m.goal : m.value >= m.goal;
-    if (!wasHit && nowHit) addXP(15, m.name + " goal reached!");
+    if (!wasHit && nowHit) addXP(S.settings.goalXP ?? 15, m.name + " goal reached!");
     saveState(); checkAchievements(); render();
   });
 
@@ -553,13 +685,125 @@ function bindViewEvents() {
   on(root, "addNote", () => {
     const body = val("noteBody"); if (!body) return;
     S.notes.push({ id: uid(), date: todayISO(), body });
-    addXP(5, "Captured a note");
+    addXP(S.settings.noteXP ?? 5, "Captured a note");
     saveState(); render();
   });
   root.querySelectorAll("[data-delnote]").forEach(b => b.onclick = () => {
     S.notes = S.notes.filter(n => n.id !== b.dataset.delnote); saveState(); render();
   });
+
+  // ---- global delete handlers (work in Admin and inline) ----
+  root.querySelectorAll("[data-delhabit]").forEach(b => b.onclick = () => {
+    const h = S.habits.find(x => x.id === b.dataset.delhabit);
+    if (!confirm(`Delete habit "${h ? h.name : ""}"? Its history stays in past logs.`)) return;
+    S.habits = S.habits.filter(x => x.id !== b.dataset.delhabit);
+    saveState(); render();
+  });
+  root.querySelectorAll("[data-delbudget]").forEach(b => b.onclick = () => {
+    S.finance.budgets = S.finance.budgets.filter(x => x.id !== b.dataset.delbudget); saveState(); render();
+  });
+  root.querySelectorAll("[data-delmetric]").forEach(b => b.onclick = () => {
+    S.health.metrics = S.health.metrics.filter(x => x.id !== b.dataset.delmetric); saveState(); render();
+  });
+  root.querySelectorAll("[data-delevent]").forEach(b => b.onclick = () => {
+    S.events = S.events.filter(x => x.id !== b.dataset.delevent); saveState(); render();
+  });
+
+  if (currentView === "admin") bindAdmin(root);
 }
+
+/* ---------- Admin panel bindings ---------- */
+function bindAdmin(root) {
+  // auth
+  on(root, "loginBtn", async () => {
+    const pw = val("adminPw");
+    const r = await Store.login(pw);
+    if (r.ok) { toast("🔓", "Logged in", "Changes now sync to the database."); await Store.pushNow(S); render(); }
+    else toast("⚠️", "Login failed", r.error || "Wrong password");
+  });
+  on(root, "logoutBtn", () => { Store.logout(); toast("🔒", "Logged out", "Editing is now read-only."); render(); });
+
+  // settings
+  on(root, "saveSettings", () => {
+    S.profile.name = val("setName") || S.profile.name;
+    S.profile.avatar = val("setAvatar") || S.profile.avatar;
+    S.profile.timezone = val("setTz");
+    S.finance.currency = val("setCurrency") || S.finance.currency;
+    S.finance.monthlyIncome = num("setIncome", S.finance.monthlyIncome);
+    S.settings.streakThreshold = clamp(num("setThreshold", 60), 1, 100);
+    S.settings.noteXP = num("setNoteXP", 5);
+    S.settings.goalXP = num("setGoalXP", 15);
+    saveState(); render(); toast("✅", "Settings saved", "");
+  });
+
+  // habits
+  on(root, "addHabitAdmin", () => {
+    const name = val("ahName"); if (!name) return;
+    S.habits.push({ id: uid(), name, ico: val("ahIco") || "✨", xp: num("ahXp", 10), cadence: "daily" });
+    saveState(); render();
+  });
+  on(root, "saveHabits", () => {
+    root.querySelectorAll("#habitRows .admin-grid").forEach(rowEl => {
+      const h = S.habits.find(x => x.id === rowEl.dataset.id); if (!h) return;
+      h.name = rowEl.querySelector("[data-h-name]").value.trim() || h.name;
+      h.ico = rowEl.querySelector("[data-h-ico]").value.trim() || h.ico;
+      h.xp = parseInt(rowEl.querySelector("[data-h-xp]").value) || h.xp;
+    });
+    saveState(); render(); toast("✅", "Habits saved", "");
+  });
+
+  // tasks
+  on(root, "saveTasks", () => {
+    root.querySelectorAll(".admin-row[data-id]").forEach(rowEl => {
+      const inp = rowEl.querySelector("[data-t-title]"); if (!inp) return;
+      const t = S.tasks.find(x => x.id === rowEl.dataset.id);
+      if (t) t.title = inp.value.trim() || t.title;
+    });
+    saveState(); render(); toast("✅", "Tasks saved", "");
+  });
+  on(root, "clearDone", () => { S.tasks = S.tasks.filter(t => !t.done); saveState(); render(); });
+
+  // budgets
+  on(root, "saveBudgets", () => {
+    root.querySelectorAll(".admin-grid[data-id]").forEach(rowEl => {
+      const b = S.finance.budgets.find(x => x.id === rowEl.dataset.id); if (!b) return;
+      const name = rowEl.querySelector("[data-b-name]"); if (!name) return;
+      b.ico = rowEl.querySelector("[data-b-ico]").value.trim() || b.ico;
+      b.name = name.value.trim() || b.name;
+      b.limit = parseFloat(rowEl.querySelector("[data-b-limit]").value) || b.limit;
+      b.spent = parseFloat(rowEl.querySelector("[data-b-spent]").value) || 0;
+    });
+    saveState(); render(); toast("✅", "Budgets saved", "");
+  });
+
+  // health
+  on(root, "saveHealth", () => {
+    root.querySelectorAll(".admin-grid[data-id]").forEach(rowEl => {
+      const m = S.health.metrics.find(x => x.id === rowEl.dataset.id); if (!m) return;
+      const nameEl = rowEl.querySelector("[data-m-name]"); if (!nameEl) return;
+      m.ico = rowEl.querySelector("[data-m-ico]").value.trim() || m.ico;
+      m.name = nameEl.value.trim() || m.name;
+      m.value = parseFloat(rowEl.querySelector("[data-m-value]").value) || 0;
+      m.goal = parseFloat(rowEl.querySelector("[data-m-goal]").value) || m.goal;
+      m.unit = rowEl.querySelector("[data-m-unit]").value.trim();
+    });
+    saveState(); render(); toast("✅", "Metrics saved", "");
+  });
+
+  // danger zone
+  on(root, "adminExport", () => document.getElementById("exportBtn").click());
+  on(root, "wipeAll", async () => {
+    if (!confirm("Wipe ALL data and reset to defaults? This cannot be undone.")) return;
+    await Store.wipeServer();
+    S = structuredClone(SEED);
+    saveState();
+    switchView("overview");
+    toast("🧹", "Wiped", "Everything reset to defaults.");
+  });
+}
+
+function num(id, fallback) { const v = parseFloat(val(id)); return isNaN(v) ? fallback : v; }
+function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
 function on(root, id, fn) { const el = document.getElementById(id); if (el) el.onclick = fn; }
 function val(id) { const el = document.getElementById(id); return el ? el.value.trim() : ""; }
@@ -572,7 +816,16 @@ function switchView(view) {
 }
 
 /* ---------- Global controls ---------- */
-function setup() {
+async function setup() {
+  await Store.init();
+  S = await Store.load(SEED);
+  normalizeState();
+
+  window.addEventListener("lifeos:auth-expired", () => {
+    toast("🔒", "Session expired", "Log in again to keep syncing.");
+    if (currentView === "admin") render();
+  });
+
   document.querySelectorAll(".nav-btn").forEach(b => b.onclick = () => switchView(b.dataset.view));
 
   document.getElementById("exportBtn").onclick = () => {
