@@ -62,15 +62,15 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 
 | Section | What it does |
 |---|---|
-| 🏠 **Overview** | Daily snapshot: streak, discipline %, level, priority tasks & next events |
+| 🏠 **Overview** | Daily snapshot: streak, discipline %, level, priority tasks, next events, and a daily mood & energy check-in |
 | 🔥 **Habits & Discipline** | Check off habits (daily or specific weekdays), build streaks, 30-day consistency heatmap, inline delete |
 | 🎯 **Weekly Goals** | Set weekly targets (e.g. 4 workouts), track progress with +/−, auto-reset every Monday, XP on completion |
-| ✅ **Tasks** | Prioritized to-dos; completing them earns XP |
+| ✅ **Tasks** | Prioritized to-dos with **due dates** and **recurring** (daily/weekly) tasks that auto-reopen; completing them earns XP |
 | 📅 **Calendar** | Upcoming events grouped by day; one-click **Google Calendar sync** (server mode) |
 | 💰 **Finance** | Monthly budgets with spend tracking, progress bars, and a spending-by-category chart |
 | ❤️ **Health** | Sleep, steps, water, weight vs. goals |
 | 📝 **Notes** | Quick journal / scratchpad |
-| 📊 **Analytics** | Charts: XP per day, discipline trend over time, and 30-day habit consistency |
+| 📊 **Analytics** | Charts: XP per day, discipline trend, mood & energy trend, and 30-day habit consistency |
 | 🏆 **Achievements** | Unlockable badges for milestones |
 | ⚙️ **Admin** | Login, edit profile/currency/income, tune XP rules & streak threshold, full add/edit/delete for habits (incl. weekday cadence), weekly goals, tasks (incl. priority), budgets, health metrics (incl. direction), events & notes, export backup, wipe & reset |
 

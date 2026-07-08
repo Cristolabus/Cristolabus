@@ -17,6 +17,7 @@ function normalizeState() {
   if (!S.finance.budgets) S.finance.budgets = [];
   if (!S.health.metrics) S.health.metrics = [];
   if (!Array.isArray(S.goals)) S.goals = [];
+  for (const t of S.tasks) { if (!t.repeat) t.repeat = "none"; if (t.due === undefined) t.due = ""; if (t.lastDone === undefined) t.lastDone = ""; }
   if (!S.profile.level) S.profile.level = 1;
   if (S.profile.xp === undefined) S.profile.xp = 0;
   if (!S.profile.name) S.profile.name = "Friend";
@@ -218,6 +219,7 @@ function fmtDate(iso) {
 function render() {
   ensureSettings();
   ensureGoalsWeek();
+  ensureTaskRecurrence();
   STREAK_THRESHOLD = S.settings.streakThreshold || 60;
   renderSidebar();
   renderTopbar();
@@ -249,6 +251,56 @@ function renderTopbar() {
   document.getElementById("topDiscipline").textContent = todayDisciplinePct();
 }
 
+/* ---------- Daily mood & energy check-in ---------- */
+const MOOD_EMOJI = ["😞", "😕", "😐", "🙂", "😄"];
+const ENERGY_EMOJI = ["😴", "🥱", "🙂", "💪", "🚀"];
+function setCheckin(field, value) {
+  const day = ensureDay(todayISO());
+  const first = day.mood == null && day.energy == null;
+  day[field] = value;
+  if (first) addXP(S.settings.checkinXP ?? 5, "Daily check-in");
+  saveState(); render();
+}
+function checkinHTML() {
+  const day = S.log[todayISO()] || {};
+  const row = (arr, attr, val) => arr.map((e, i) =>
+    `<button class="mood-btn ${val === i + 1 ? "sel" : ""}" data-${attr}="${i + 1}" title="${i + 1}/5">${e}</button>`).join("");
+  return `<div class="card">
+    <h2>🌤️ Daily Check-in ${(day.mood || day.energy) ? "<span class='up' style='font-size:12px'>logged ✓</span>" : ""}</h2>
+    <div class="checkin-label">Mood</div>
+    <div class="mood-row">${row(MOOD_EMOJI, "mood", day.mood)}</div>
+    <div class="checkin-label" style="margin-top:10px">Energy</div>
+    <div class="mood-row">${row(ENERGY_EMOJI, "energy", day.energy)}</div>
+  </div>`;
+}
+
+/* ---------- Recurring tasks ---------- */
+// Repeating tasks re-open when their period rolls over.
+function ensureTaskRecurrence() {
+  const today = todayISO(), wk = mondayISO();
+  let changed = false;
+  for (const t of S.tasks) {
+    if (!t.repeat || t.repeat === "none" || !t.done || !t.lastDone) continue;
+    const rolled = t.repeat === "daily" ? t.lastDone < today : mondayISO(t.lastDone) < wk;
+    if (rolled) { t.done = false; changed = true; }
+  }
+  if (changed) saveState();
+}
+function fmtShort(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+// Sort: incomplete first, then by due date (soonest, blanks last), then priority.
+function sortedTasks() {
+  const prioRank = { high: 0, med: 1, low: 2 };
+  return S.tasks.slice().sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const ad = a.due || "9999", bd = b.due || "9999";
+    if (ad !== bd) return ad < bd ? -1 : 1;
+    return (prioRank[a.priority] ?? 1) - (prioRank[b.priority] ?? 1);
+  });
+}
+
 /* ---------- Views ---------- */
 const VIEWS = {
   overview() {
@@ -262,6 +314,8 @@ const VIEWS = {
         ${kpi("⭐", "Lv " + S.profile.level, titleForLevel(S.profile.level), `${S.profile.xp}/${xpForLevel(S.profile.level)} XP`)}
         ${kpi("✅", doneTasks + "/" + S.tasks.length, "Tasks done", "today")}
       </div>
+
+      <div style="margin-top:18px">${checkinHTML()}</div>
 
       <div class="grid cols-2" style="margin-top:18px">
         <div class="card">
@@ -356,18 +410,25 @@ const VIEWS = {
   },
 
   tasks() {
-    const active = S.tasks.filter(t => !t.done);
-    const done = S.tasks.filter(t => t.done);
+    const sorted = sortedTasks();
+    const active = sorted.filter(t => !t.done);
+    const done = sorted.filter(t => t.done);
     return `
       <h2 class="section-title">✅ Tasks</h2>
       <div class="card">
-        <div class="row">
-          <input class="input" id="newTask" placeholder="Add a task…" />
+        <div class="row wrap">
+          <input class="input" id="newTask" placeholder="Add a task…" style="flex:1;min-width:160px" />
           <select id="newTaskPrio" style="width:auto">
             <option value="high">High</option>
             <option value="med" selected>Medium</option>
             <option value="low">Low</option>
           </select>
+          <select id="newTaskRepeat" style="width:auto" title="Repeat">
+            <option value="none">One-off</option>
+            <option value="daily">🔁 Daily</option>
+            <option value="weekly">🔁 Weekly</option>
+          </select>
+          <input class="input" id="newTaskDue" type="date" title="Due date" style="width:auto" />
           <button class="btn" id="addTask">Add</button>
         </div>
       </div>
@@ -489,6 +550,9 @@ const VIEWS = {
     const isos = lastNDays(days);
     const xpSeries = isos.map(iso => { const v = (S.log[iso]?.xpEarned) || 0; return { label: shortDay(iso), value: v, tip: fmtDate(iso) + " · " + v + " XP" }; });
     const discSeries = isos.map(iso => { const v = dayDisciplinePct(iso); return { label: shortDay(iso), value: v, tip: fmtDate(iso) + " · " + v + "%" }; });
+    const moodSeries = isos.map(iso => { const v = (S.log[iso]?.mood) || 0; return { label: shortDay(iso), value: v, tip: fmtDate(iso) + " · mood " + (v || "—") + "/5" }; });
+    const energySeries = isos.map(iso => { const v = (S.log[iso]?.energy) || 0; return { label: shortDay(iso), value: v, tip: fmtDate(iso) + " · energy " + (v || "—") + "/5" }; });
+    const hasMood = moodSeries.some(d => d.value > 0);
     const habitBreak = S.habits.map(h => { const v = habitRate30(h.id); return { label: h.name, value: v, tip: h.name + " · " + v + "% of last 30 days" }; }).sort((a, b) => b.value - a.value);
     const totalXP14 = xpSeries.reduce((s, d) => s + d.value, 0);
     const bestDay = Math.max(0, ...xpSeries.map(d => d.value));
@@ -512,6 +576,11 @@ const VIEWS = {
         <div class="chart-wrap">${Charts.line(discSeries, { color: "#4dd6ff", unit: "%", max: 100 })}</div>
         ${legend("#4dd6ff", "Daily discipline %")}
       </div>
+      ${hasMood ? `<div class="card" style="margin-top:18px"><h2>🌤️ Mood &amp; energy</h2>
+        <div class="chart-wrap">${Charts.line(moodSeries, { color: "#ffb347", unit: "/5", max: 5 })}</div>
+        <div class="chart-wrap" style="margin-top:6px">${Charts.line(energySeries, { color: "#3ddc97", unit: "/5", max: 5 })}</div>
+        <div class="chart-legend"><span><span class="dot" style="background:#ffb347"></span>Mood</span><span><span class="dot" style="background:#3ddc97"></span>Energy</span></div>
+      </div>` : ""}
       <div class="card" style="margin-top:18px"><h2>🔥 Habit consistency — last 30 days</h2>
         ${habitBreak.length ? `<div class="chart-wrap">${Charts.hbars(habitBreak, { color: "#3ddc97" })}</div>` : `<div class="empty">Add some habits to see consistency here.</div>`}
       </div>
@@ -623,12 +692,16 @@ const VIEWS = {
 
     // ---- tasks (with priority) ----
     html += `<div class="card"><h2>✅ Manage Tasks</h2><div id="taskRows">` +
-      (S.tasks.length ? S.tasks.map(t => `<div class="admin-row" data-id="${t.id}" style="grid-template-columns:34px 1fr 96px auto">
+      (S.tasks.length ? S.tasks.map(t => `<div class="admin-row" data-id="${t.id}" style="grid-template-columns:30px 1fr 84px 96px 138px auto">
         <div>${t.done ? "✅" : "⬜"}</div>
         <input class="input" data-t-title value="${esc(t.title)}">
-        <select class="input" data-t-prio style="width:96px">
+        <select class="input" data-t-prio style="width:84px">
           ${["high", "med", "low"].map(p => `<option value="${p}" ${t.priority === p ? "selected" : ""}>${p}</option>`).join("")}
         </select>
+        <select class="input" data-t-repeat style="width:96px">
+          ${[["none", "one-off"], ["daily", "🔁 daily"], ["weekly", "🔁 weekly"]].map(([v, l]) => `<option value="${v}" ${(t.repeat || "none") === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+        <input class="input" data-t-due type="date" value="${t.due || ""}">
         <button class="icon-btn" data-deltask="${t.id}">✕</button>
       </div>`).join("") : `<div class="empty">No tasks.</div>`) + `</div>
       <div class="row" style="margin-top:12px"><button class="btn soft" id="clearDone">Clear completed</button><button class="btn" id="saveTasks">Save tasks</button></div>
@@ -761,9 +834,13 @@ function habitStreak(id) {
   return streak;
 }
 function taskHTML(t) {
+  const overdue = t.due && !t.done && t.due < todayISO();
+  const dueTag = t.due ? `<span class="tag ${overdue ? "p-high" : ""}">${overdue ? "⚠ " : "📅 "}${fmtShort(t.due)}</span>` : "";
+  const repTag = (t.repeat && t.repeat !== "none") ? `<span class="tag">🔁 ${t.repeat}</span>` : "";
   return `<div class="task ${t.done ? "done" : ""}">
     <button class="check ${t.done ? "done" : ""}" data-task="${t.id}">✓</button>
     <span class="task-title">${esc(t.title)}</span>
+    ${dueTag}${repTag}
     <span class="tag p-${t.priority}">${t.priority}</span>
     <button class="icon-btn" data-deltask="${t.id}">✕</button>
   </div>`;
@@ -898,8 +975,8 @@ function bindViewEvents() {
   root.querySelectorAll("[data-task]").forEach(b => b.onclick = () => {
     const t = S.tasks.find(x => x.id === b.dataset.task);
     t.done = !t.done;
-    if (t.done) { addXP(t.xp || 10, "Task: " + t.title); S.profile.tasksDone = (S.profile.tasksDone || 0) + 1; }
-    else { removeXP(t.xp || 10); S.profile.tasksDone = Math.max(0, (S.profile.tasksDone || 0) - 1); }
+    if (t.done) { t.lastDone = todayISO(); addXP(t.xp || 10, "Task: " + t.title); S.profile.tasksDone = (S.profile.tasksDone || 0) + 1; }
+    else { t.lastDone = ""; removeXP(t.xp || 10); S.profile.tasksDone = Math.max(0, (S.profile.tasksDone || 0) - 1); }
     saveState(); checkAchievements(); render();
   });
   root.querySelectorAll("[data-deltask]").forEach(b => b.onclick = () => {
@@ -907,9 +984,16 @@ function bindViewEvents() {
   });
   on(root, "addTask", () => {
     const v = val("newTask"); if (!v) return;
-    S.tasks.unshift({ id: uid(), title: v, priority: document.getElementById("newTaskPrio").value, done: false, xp: 10 });
+    S.tasks.unshift({
+      id: uid(), title: v, priority: document.getElementById("newTaskPrio").value, done: false, xp: 10,
+      repeat: document.getElementById("newTaskRepeat").value, due: val("newTaskDue"), lastDone: "",
+    });
     saveState(); render();
   });
+
+  // daily check-in
+  root.querySelectorAll("[data-mood]").forEach(b => b.onclick = () => setCheckin("mood", parseInt(b.dataset.mood)));
+  root.querySelectorAll("[data-energy]").forEach(b => b.onclick = () => setCheckin("energy", parseInt(b.dataset.energy)));
 
   // events
   on(root, "addEvent", () => {
@@ -1076,6 +1160,8 @@ function bindAdmin(root) {
       const t = S.tasks.find(x => x.id === rowEl.dataset.id); if (!t) return;
       t.title = rowEl.querySelector("[data-t-title]").value.trim() || t.title;
       t.priority = rowEl.querySelector("[data-t-prio]").value;
+      t.repeat = rowEl.querySelector("[data-t-repeat]").value;
+      t.due = rowEl.querySelector("[data-t-due]").value;
     });
     saveState(); render(); toast("✅", "Tasks saved", "");
   });

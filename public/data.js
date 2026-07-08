@@ -22,6 +22,7 @@ const SEED = {
     noteXP: 5,             // XP for saving a note
     goalXP: 15,            // XP for hitting a health goal
     weeklyGoalXP: 40,      // XP for completing a weekly goal/target
+    checkinXP: 5,          // XP for the daily mood/energy check-in
   },
 
   // Daily discipline log: { "2026-06-26": { habits: {habitId: true}, xpEarned: 40 } }
@@ -45,11 +46,12 @@ const SEED = {
     { id: "g3", name: "Deep work", ico: "🧠", target: 15, unit: "h", progress: 6, weekStart: mondayISO() },
   ],
 
+  // repeat: "none" | "daily" | "weekly"; due: "YYYY-MM-DD" or "".
   tasks: [
-    { id: "t1", title: "Plan the week ahead", priority: "high", done: false, xp: 20 },
-    { id: "t2", title: "Reply to pending emails", priority: "med", done: false, xp: 10 },
-    { id: "t3", title: "Grocery run", priority: "low", done: false, xp: 5 },
-    { id: "t4", title: "Review monthly budget", priority: "med", done: false, xp: 15 },
+    { id: "t1", title: "Plan the week ahead", priority: "high", done: false, xp: 20, repeat: "weekly", due: "", lastDone: "" },
+    { id: "t2", title: "Reply to pending emails", priority: "med", done: false, xp: 10, repeat: "daily", due: "", lastDone: "" },
+    { id: "t3", title: "Grocery run", priority: "low", done: false, xp: 5, repeat: "none", due: addDaysISO(2), lastDone: "" },
+    { id: "t4", title: "Review monthly budget", priority: "med", done: false, xp: 15, repeat: "none", due: "", lastDone: "" },
   ],
 
   events: [
@@ -112,6 +114,8 @@ function seedLog() {
   const ids = Object.keys(habitDefs);
   // completion pattern per day (how many of the 6 habits were done), oldest→newest
   const pattern = [2, 3, 3, 4, 3, 5, 4, 5, 4, 6, 5, 6, 5];
+  const moods = [2, 3, 3, 3, 2, 4, 3, 4, 3, 5, 4, 5, 4];
+  const energy = [3, 3, 2, 4, 3, 4, 4, 4, 3, 5, 4, 4, 5];
   const log = {};
   for (let k = 0; k < pattern.length; k++) {
     const daysAgo = pattern.length - k;           // 13 … 1
@@ -119,7 +123,7 @@ function seedLog() {
     const iso = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
     const habits = {}; let xp = 0;
     for (let i = 0; i < pattern[k]; i++) { habits[ids[i]] = true; xp += habitDefs[ids[i]]; }
-    log[iso] = { habits, xpEarned: xp };
+    log[iso] = { habits, xpEarned: xp, mood: moods[k], energy: energy[k] };
   }
   return log;
 }
