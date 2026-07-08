@@ -24,7 +24,8 @@ const SEED = {
   },
 
   // Daily discipline log: { "2026-06-26": { habits: {habitId: true}, xpEarned: 40 } }
-  log: {},
+  // Seeded with a realistic recent history so Analytics isn't blank on day one.
+  log: seedLog(),
 
   habits: [
     { id: "h1", name: "Wake up before 7:00", ico: "🌅", xp: 15, cadence: "daily" },
@@ -87,3 +88,22 @@ function addDaysISO(n) {
   return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
 }
 function pad(n) { return String(n).padStart(2, "0"); }
+
+// Deterministic demo history for the last 13 days (excludes today), showing a
+// gentle upward consistency trend. Replaced as soon as you start checking habits.
+function seedLog() {
+  const habitDefs = { h1: 15, h2: 20, h3: 25, h4: 10, h5: 10, h6: 10 };
+  const ids = Object.keys(habitDefs);
+  // completion pattern per day (how many of the 6 habits were done), oldest→newest
+  const pattern = [2, 3, 3, 4, 3, 5, 4, 5, 4, 6, 5, 6, 5];
+  const log = {};
+  for (let k = 0; k < pattern.length; k++) {
+    const daysAgo = pattern.length - k;           // 13 … 1
+    const d = new Date(); d.setDate(d.getDate() - daysAgo);
+    const iso = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+    const habits = {}; let xp = 0;
+    for (let i = 0; i < pattern[k]; i++) { habits[ids[i]] = true; xp += habitDefs[ids[i]]; }
+    log[iso] = { habits, xpEarned: xp };
+  }
+  return log;
+}

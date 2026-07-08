@@ -392,6 +392,40 @@ const VIEWS = {
     `;
   },
 
+  analytics() {
+    const days = 14;
+    const isos = lastNDays(days);
+    const xpSeries = isos.map(iso => { const v = (S.log[iso]?.xpEarned) || 0; return { label: shortDay(iso), value: v, tip: fmtDate(iso) + " · " + v + " XP" }; });
+    const discSeries = isos.map(iso => { const v = dayDisciplinePct(iso); return { label: shortDay(iso), value: v, tip: fmtDate(iso) + " · " + v + "%" }; });
+    const habitBreak = S.habits.map(h => { const v = habitRate30(h.id); return { label: h.name, value: v, tip: h.name + " · " + v + "% of last 30 days" }; }).sort((a, b) => b.value - a.value);
+    const totalXP14 = xpSeries.reduce((s, d) => s + d.value, 0);
+    const bestDay = Math.max(0, ...xpSeries.map(d => d.value));
+    const avgDisc = Math.round(discSeries.reduce((s, d) => s + d.value, 0) / days);
+
+    const legend = (color, label) => `<div class="chart-legend"><span><span class="dot" style="background:${color}"></span>${esc(label)}</span></div>`;
+
+    return `
+      <h2 class="section-title">📊 Analytics</h2>
+      <div class="grid cols-4">
+        ${kpi("💎", totalXP14, "XP earned", "last 14 days")}
+        ${kpi("📈", avgDisc + "%", "Avg discipline", "last 14 days")}
+        ${kpi("🥇", bestDay, "Best day", "XP in one day")}
+        ${kpi("🔥", longestStreak(), "Longest streak", "days")}
+      </div>
+      <div class="card" style="margin-top:18px"><h2>💎 XP earned per day</h2>
+        <div class="chart-wrap">${Charts.bar(xpSeries, { color: "#7c5cff", unit: " XP" })}</div>
+        ${legend("#7c5cff", "XP per day")}
+      </div>
+      <div class="card" style="margin-top:18px"><h2>🎯 Discipline over time</h2>
+        <div class="chart-wrap">${Charts.line(discSeries, { color: "#4dd6ff", unit: "%", max: 100 })}</div>
+        ${legend("#4dd6ff", "Daily discipline %")}
+      </div>
+      <div class="card" style="margin-top:18px"><h2>🔥 Habit consistency — last 30 days</h2>
+        ${habitBreak.length ? `<div class="chart-wrap">${Charts.hbars(habitBreak, { color: "#3ddc97" })}</div>` : `<div class="empty">Add some habits to see consistency here.</div>`}
+      </div>
+    `;
+  },
+
   admin() {
     const online = Store.isOnline();
     const authed = Store.isAuthed();
@@ -595,6 +629,19 @@ function avgDisciplinePct() {
   return Math.round(sum / 30);
 }
 
+/* ---------- Analytics helpers ---------- */
+function lastNDays(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); out.push(isoOf(d)); }
+  return out;
+}
+function shortDay(iso) { return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { day: "numeric" }); }
+function habitRate30(id) {
+  let done = 0;
+  for (let i = 0; i < 30; i++) { const d = new Date(); d.setDate(d.getDate() - i); if (S.log[isoOf(d)]?.habits?.[id]) done++; }
+  return Math.round((done / 30) * 100);
+}
+
 /* ---------- Event/date helpers ---------- */
 function upcomingEvents() {
   const today = todayISO();
@@ -612,6 +659,18 @@ function bindViewEvents() {
 
   // nav shortcuts
   root.querySelectorAll("[data-go]").forEach(b => b.onclick = () => switchView(b.dataset.go));
+
+  // chart tooltips
+  const tip = document.getElementById("chartTip");
+  root.querySelectorAll("[data-tip]").forEach(el => {
+    el.addEventListener("mousemove", e => {
+      tip.textContent = el.getAttribute("data-tip");
+      tip.style.left = e.clientX + "px";
+      tip.style.top = e.clientY + "px";
+      tip.classList.add("show");
+    });
+    el.addEventListener("mouseleave", () => tip.classList.remove("show"));
+  });
 
   // habit toggle
   root.querySelectorAll("[data-habit]").forEach(b => b.onclick = () => {

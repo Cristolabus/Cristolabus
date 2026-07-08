@@ -44,6 +44,14 @@ ADMIN_PASSWORD=mySecret PORT=8080 npm start
 
 The app auto-detects which mode it's in and shows the status in **Admin → Backend**.
 
+### 3. Docker
+
+```bash
+docker build -t life-os .
+docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
+# open http://localhost:3000  (database persists in the life-os-data volume)
+```
+
 ## What's inside
 
 | Section | What it does |
@@ -55,6 +63,7 @@ The app auto-detects which mode it's in and shows the status in **Admin → Back
 | 💰 **Finance** | Monthly budgets with spend tracking and progress bars |
 | ❤️ **Health** | Sleep, steps, water, weight vs. goals |
 | 📝 **Notes** | Quick journal / scratchpad |
+| 📊 **Analytics** | Charts: XP per day, discipline trend over time, and 30-day habit consistency |
 | 🏆 **Achievements** | Unlockable badges for milestones |
 | ⚙️ **Admin** | Login, edit profile/currency/income, tune XP rules & streak threshold, full add/edit/delete for habits, tasks, budgets, health metrics & events, export backup, wipe & reset |
 
@@ -88,7 +97,9 @@ public/
   styles.css   theme & components
   data.js      default seed data (first run only)
   store.js     storage/sync layer (server ↔ localStorage)
+  charts.js    dependency-free inline-SVG charts
   app.js       gamification engine, views, Admin panel
+Dockerfile     container image (Node + SQLite)
 ```
 
 ## Connecting real data (Google Calendar, Notion, etc.)

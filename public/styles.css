@@ -230,6 +230,20 @@ body {
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
+/* ===== Charts ===== */
+.chart-wrap { overflow-x: auto; }
+.ch-bar, .ch-dot-hit { cursor: pointer; transition: opacity .12s; }
+.ch-bar:hover { opacity: .8; }
+.chart-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.chart-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+.chart-tip {
+  position: fixed; pointer-events: none; z-index: 1000; opacity: 0;
+  background: #0b0d14; border: 1px solid var(--accent); border-radius: 8px;
+  padding: 6px 10px; font-size: 12px; color: var(--text); box-shadow: var(--shadow);
+  transform: translate(-50%, -130%); transition: opacity .1s; white-space: nowrap;
+}
+.chart-tip.show { opacity: 1; }
+
 /* ===== Admin panel ===== */
 .admin-row { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .admin-row:last-child { border-bottom: none; }
