@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Life OS — Personal Dashboard</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <meta name="theme-color" content="#0c0e16" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <!-- Apply saved theme before paint to avoid a flash -->
+  <script>
+    try {
+      var s = JSON.parse(localStorage.getItem("lifeos.state") || "{}");
+      document.documentElement.setAttribute("data-theme", (s.settings && s.settings.theme) === "light" ? "light" : "dark");
+    } catch (e) { document.documentElement.setAttribute("data-theme", "dark"); }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -52,6 +65,7 @@
       </nav>
 
       <div class="sidebar-foot">
+        <button class="ghost-btn" id="themeBtn">🌙 Theme</button>
         <button class="ghost-btn" id="exportBtn">⬇ Export</button>
         <button class="ghost-btn" id="importBtn">⬆ Import</button>
         <input type="file" id="importFile" accept="application/json" hidden />
@@ -86,5 +100,10 @@
   <script src="charts.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+    }
+  </script>
 </body>
 </html>

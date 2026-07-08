@@ -4,7 +4,8 @@ A gamified dashboard for running your personal life: discipline & consistency
 tracking, habits, tasks, calendar, finance, health, and notes — with an XP/level
 system, streaks, achievements, an **Admin panel** for full control, and an
 optional **Node + SQLite backend** so your data lives on a server, not just one
-browser.
+browser. It's a **PWA** (installable on your phone, works offline) with **light
+and dark themes**.
 
 ## Two ways to run it
 
@@ -19,6 +20,11 @@ open public/index.html       # macOS
 ```
 
 In offline mode the Admin panel needs no login.
+
+**Install as an app:** when served over http (server or Docker mode), open it in
+Chrome/Edge/Safari and choose *Install* / *Add to Home Screen*. It runs
+full-screen and works offline thanks to the service worker. Toggle **light/dark**
+with the Theme button in the sidebar.
 
 ### 2. With the server + database (recommended)
 
@@ -105,8 +111,11 @@ public/
   styles.css   theme & components
   data.js      default seed data (first run only)
   store.js     storage/sync layer (server ↔ localStorage)
-  charts.js    dependency-free inline-SVG charts
-  app.js       gamification engine, views, Admin panel
+  charts.js    dependency-free inline-SVG charts (theme-aware)
+  app.js       gamification engine, views, Admin panel, theme
+  manifest.webmanifest  PWA manifest
+  sw.js        service worker (offline app shell)
+  icon.svg     app icon
 Dockerfile     container image (Node + SQLite)
 ```
 

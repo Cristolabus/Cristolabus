@@ -4,8 +4,16 @@
  * wired by app.js via [data-tip] attributes and a shared #chartTip element.
  */
 const Charts = (() => {
-  const TXT = "#8b91a8";      // muted ink for labels/axes
-  const GRID = "#262c40";
+  // Read theme colors live so charts adapt to light/dark.
+  function cssVar(name, fallback) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+  const theme = () => ({
+    TXT: cssVar("--muted", "#8b91a8"),
+    GRID: cssVar("--border", "#262c40"),
+    INK: cssVar("--text", "#e7eaf3"),
+  });
 
   function niceMax(v) {
     if (v <= 0) return 10;
@@ -17,6 +25,7 @@ const Charts = (() => {
 
   // Vertical bar chart. series: [{label, value, tip}]
   function bar(series, { color = "#7c5cff", h = 180, unit = "" } = {}) {
+    const { TXT, GRID } = theme();
     const w = Math.max(series.length * 34, 320);
     const padL = 34, padB = 26, padT = 10;
     const max = niceMax(Math.max(1, ...series.map(s => s.value)));
@@ -46,6 +55,7 @@ const Charts = (() => {
 
   // Line + area chart. series: [{label, value, tip}]
   function line(series, { color = "#4dd6ff", h = 180, unit = "", max: fixedMax } = {}) {
+    const { TXT, GRID } = theme();
     const w = Math.max(series.length * 34, 320);
     const padL = 34, padB = 26, padT = 10;
     const max = fixedMax || niceMax(Math.max(1, ...series.map(s => s.value)));
@@ -80,13 +90,14 @@ const Charts = (() => {
 
   // Horizontal bars with direct labels. series: [{label, value, tip}] (value 0..100)
   function hbars(series, { color = "#3ddc97", unit = "%" } = {}) {
+    const { TXT, GRID, INK } = theme();
     const rowH = 30, w = 480, padL = 4, labelW = 150, valW = 44;
     const barMax = w - labelW - valW - padL;
     let rows = "";
     series.forEach((s, i) => {
       const y = i * rowH;
       const bw = (Math.min(100, s.value) / 100) * barMax;
-      rows += `<text x="${padL}" y="${y + rowH / 2 + 4}" font-size="12" fill="#e7eaf3">${esc(s.label)}</text>`;
+      rows += `<text x="${padL}" y="${y + rowH / 2 + 4}" font-size="12" fill="${INK}">${esc(s.label)}</text>`;
       rows += `<rect x="${labelW}" y="${y + 7}" width="${barMax}" height="${rowH - 16}" rx="4" fill="${GRID}"/>`;
       rows += `<rect x="${labelW}" y="${y + 7}" width="${Math.max(0, bw)}" height="${rowH - 16}" rx="4" fill="${color}"
         data-tip="${esc(s.tip || (s.label + ": " + s.value + unit))}" class="ch-bar"/>`;

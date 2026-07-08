@@ -4,7 +4,7 @@
 /* ---------- State management ---------- */
 function ensureSettings() {
   if (!S.settings) S.settings = {};
-  const defaults = { streakThreshold: 60, noteXP: 5, goalXP: 15, weeklyGoalXP: 40 };
+  const defaults = { streakThreshold: 60, noteXP: 5, goalXP: 15, weeklyGoalXP: 40, theme: "dark" };
   for (const k in defaults) if (S.settings[k] === undefined) S.settings[k] = defaults[k];
 }
 // Backfill any missing top-level structures so a partial/old saved state
@@ -1107,11 +1107,28 @@ function switchView(view) {
   render();
 }
 
+/* ---------- Theme ---------- */
+function applyTheme(theme) {
+  const t = theme === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", t);
+  const btn = document.getElementById("themeBtn");
+  if (btn) btn.textContent = t === "light" ? "☀️ Theme" : "🌙 Theme";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", t === "light" ? "#f3f5fb" : "#0c0e16");
+}
+function toggleTheme() {
+  const next = (S.settings.theme === "light") ? "dark" : "light";
+  S.settings.theme = next;
+  applyTheme(next);
+  saveState();
+}
+
 /* ---------- Global controls ---------- */
 async function setup() {
   await Store.init();
   S = await Store.load(SEED);
   normalizeState();
+  applyTheme(S.settings.theme);
 
   window.addEventListener("lifeos:auth-expired", () => {
     toast("🔒", "Session expired", "Log in again to keep syncing.");
@@ -1119,6 +1136,7 @@ async function setup() {
   });
 
   document.querySelectorAll(".nav-btn").forEach(b => b.onclick = () => switchView(b.dataset.view));
+  document.getElementById("themeBtn").onclick = toggleTheme;
 
   document.getElementById("exportBtn").onclick = () => {
     const blob = new Blob([JSON.stringify(S, null, 2)], { type: "application/json" });
