@@ -11,6 +11,7 @@ const Store = (() => {
   let online = false;          // is the backend reachable?
   let token = localStorage.getItem(TOKEN_KEY) || null;
   let saveTimer = null;
+  let pendingState = null;   // last unsynced state, flushed on page hide
 
   async function api(path, opts = {}) {
     const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
@@ -24,6 +25,21 @@ const Store = (() => {
       const res = await fetch("/api/health");
       online = res.ok;
     } catch { online = false; }
+    // Flush any pending debounced save before the page goes away, so the last
+    // edit is never lost on reload/close. keepalive lets it complete post-unload.
+    const flush = () => {
+      if (!online || !token || !pendingState) return;
+      try {
+        fetch("/api/state", {
+          method: "PUT", keepalive: true,
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+          body: JSON.stringify(pendingState),
+        });
+        pendingState = null;
+      } catch { /* best effort */ }
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
     return online;
   }
 
@@ -60,12 +76,14 @@ const Store = (() => {
   function save(state) {
     localStorage.setItem(LS_KEY, JSON.stringify(state));
     if (online && token) {
+      pendingState = state;
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => pushNow(state), 600);
     }
   }
 
   async function pushNow(state) {
+    pendingState = null;
     try {
       const res = await api("/api/state", { method: "PUT", body: JSON.stringify(state) });
       if (res.status === 401) { logout(); window.dispatchEvent(new Event("lifeos:auth-expired")); }

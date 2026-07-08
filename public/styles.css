@@ -258,6 +258,15 @@ body {
 .badge { font-size: 11px; padding: 3px 9px; border-radius: 99px; font-weight: 700; }
 .badge.on { background: rgba(61,220,151,.15); color: var(--green); }
 .badge.off { background: rgba(139,145,168,.15); color: var(--muted); }
+.admin-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.admin-item:last-child { border-bottom: none; }
+.wd-row { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding-left: 2px; }
+.wd {
+  width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--bg-2); color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; transition: .12s;
+}
+.wd:hover { border-color: var(--accent); }
+.wd.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .danger-zone { border-color: var(--red) !important; }
 .danger-zone h2 { color: var(--red); }
 .login-box { max-width: 380px; }

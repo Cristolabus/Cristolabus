@@ -65,6 +65,59 @@ app.delete("/api/state", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---- Granular per-collection CRUD ----
+ * Real create / modify / delete for each entity, operating on the stored
+ * document. Useful for scripting, automation, and integrations.
+ *   POST   /api/collection/:name        create (body = item; id auto if absent)
+ *   PUT    /api/collection/:name/:id     modify (body = partial fields to merge)
+ *   DELETE /api/collection/:name/:id     delete
+ */
+const COLLECTIONS = {
+  habits: s => s.habits,
+  tasks: s => s.tasks,
+  events: s => s.events,
+  notes: s => s.notes,
+  goals: s => s.goals,
+  budgets: s => s.finance && s.finance.budgets,
+  metrics: s => s.health && s.health.metrics,
+};
+function resolveCollection(res, name) {
+  const state = db.getState();
+  if (!state) { res.status(409).json({ error: "No state yet — save the dashboard first." }); return null; }
+  const getter = COLLECTIONS[name];
+  if (!getter) { res.status(404).json({ error: "Unknown collection: " + name }); return null; }
+  const arr = getter(state);
+  if (!Array.isArray(arr)) { res.status(500).json({ error: "Collection not initialized: " + name }); return null; }
+  return { state, arr };
+}
+
+app.post("/api/collection/:name", requireAuth, (req, res) => {
+  const ctx = resolveCollection(res, req.params.name); if (!ctx) return;
+  const item = Object.assign({}, req.body);
+  if (!item.id) item.id = "id" + crypto.randomBytes(5).toString("hex");
+  ctx.arr.push(item);
+  db.saveState(ctx.state);
+  res.status(201).json(item);
+});
+
+app.put("/api/collection/:name/:id", requireAuth, (req, res) => {
+  const ctx = resolveCollection(res, req.params.name); if (!ctx) return;
+  const item = ctx.arr.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found: " + req.params.id });
+  Object.assign(item, req.body, { id: item.id });
+  db.saveState(ctx.state);
+  res.json(item);
+});
+
+app.delete("/api/collection/:name/:id", requireAuth, (req, res) => {
+  const ctx = resolveCollection(res, req.params.name); if (!ctx) return;
+  const idx = ctx.arr.findIndex(x => x.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Not found: " + req.params.id });
+  const [removed] = ctx.arr.splice(idx, 1);
+  db.saveState(ctx.state);
+  res.json({ ok: true, removed });
+});
+
 // ---- Static frontend ----
 app.use(express.static(path.join(__dirname, "..", "public")));
 

@@ -3,22 +3,46 @@
 
 /* ---------- State management ---------- */
 function ensureSettings() {
-  if (!S.settings) S.settings = { streakThreshold: 60, noteXP: 5, goalXP: 15 };
+  if (!S.settings) S.settings = {};
+  const defaults = { streakThreshold: 60, noteXP: 5, goalXP: 15, weeklyGoalXP: 40 };
+  for (const k in defaults) if (S.settings[k] === undefined) S.settings[k] = defaults[k];
 }
 // Backfill any missing top-level structures so a partial/old saved state
 // can never crash the UI.
 function normalizeState() {
   if (!S || typeof S !== "object") S = structuredClone(SEED);
-  for (const key of ["profile", "log", "habits", "tasks", "events", "finance", "health", "notes", "settings"]) {
+  for (const key of ["profile", "log", "habits", "tasks", "events", "finance", "health", "notes", "settings", "goals"]) {
     if (S[key] === undefined || S[key] === null) S[key] = structuredClone(SEED[key]);
   }
   if (!S.finance.budgets) S.finance.budgets = [];
   if (!S.health.metrics) S.health.metrics = [];
+  if (!Array.isArray(S.goals)) S.goals = [];
   if (!S.profile.level) S.profile.level = 1;
   if (S.profile.xp === undefined) S.profile.xp = 0;
   if (!S.profile.name) S.profile.name = "Friend";
   if (!S.profile.avatar) S.profile.avatar = "🧗";
   ensureSettings();
+}
+// Reset weekly goal progress when a new week starts.
+function ensureGoalsWeek() {
+  if (!Array.isArray(S.goals)) S.goals = [];
+  const wk = mondayISO();
+  let changed = false;
+  for (const g of S.goals) {
+    if (g.weekStart !== wk) { g.weekStart = wk; g.progress = 0; g.completedAwarded = false; changed = true; }
+  }
+  if (changed) saveState();
+}
+// Update a goal's progress and award XP the first time it's completed this week.
+function bumpGoal(g, value) {
+  const wasDone = g.progress >= g.target;
+  g.progress = Math.max(0, value);
+  const nowDone = g.progress >= g.target;
+  if (!wasDone && nowDone && !g.completedAwarded) {
+    g.completedAwarded = true;
+    addXP(S.settings.weeklyGoalXP ?? 40, "Weekly goal: " + g.name);
+  }
+  saveState(); checkAchievements(); render();
 }
 // Persist: caches locally and (when logged in) syncs to the SQLite backend.
 function saveState() {
@@ -78,14 +102,31 @@ function ensureDay(iso) {
   return S.log[iso];
 }
 
+/* ---------- Habit scheduling ---------- */
+// A habit with an empty (or missing) days array is daily; otherwise it's only
+// scheduled on the listed weekdays (0=Sun … 6=Sat).
+function habitScheduled(h, iso) {
+  if (!h.days || h.days.length === 0) return true;
+  const wd = new Date(iso + "T00:00:00").getDay();
+  return h.days.includes(wd);
+}
+function scheduledHabits(iso) { return S.habits.filter(h => habitScheduled(h, iso)); }
+const WD_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function cadenceLabel(h) {
+  if (!h.days || h.days.length === 0) return "daily";
+  if (h.days.length === 7) return "daily";
+  return h.days.slice().sort().map(d => WD_NAMES[d]).join(" ");
+}
+
 /* ---------- Discipline & streaks ---------- */
-// Discipline score for a day = % of habits completed.
+// Discipline score for a day = % of that day's SCHEDULED habits completed.
 function dayDisciplinePct(iso) {
-  const total = S.habits.length;
+  const sched = scheduledHabits(iso);
+  const total = sched.length;
   if (!total) return 0;
   const day = S.log[iso];
   if (!day) return 0;
-  const done = Object.values(day.habits).filter(Boolean).length;
+  const done = sched.filter(h => day.habits[h.id]).length;
   return Math.round((done / total) * 100);
 }
 function todayDisciplinePct() { return dayDisciplinePct(todayISO()); }
@@ -176,6 +217,7 @@ function fmtDate(iso) {
 /* ================= RENDERING ================= */
 function render() {
   ensureSettings();
+  ensureGoalsWeek();
   STREAK_THRESHOLD = S.settings.streakThreshold || 60;
   renderSidebar();
   renderTopbar();
@@ -251,6 +293,18 @@ const VIEWS = {
           ${S.tasks.filter(t => !t.done).slice(0, 4).map(taskHTML).join("") || `<div class="empty">All clear! 🎉</div>`}
         </div>
       </div>
+
+      <div class="card" style="margin-top:18px">
+        <h2>🎯 Weekly Goals <span class="h-spacer"></span><button class="btn sm" data-go="goals">Open</button></h2>
+        ${(S.goals && S.goals.length) ? S.goals.map(g => {
+          const pct = Math.min(100, Math.round((g.progress / g.target) * 100));
+          const done = g.progress >= g.target;
+          return `<div class="budget-row">
+            <div class="budget-head"><span>${g.ico || "🎯"} ${esc(g.name)} ${done ? "✓" : ""}</span><span>${g.progress}/${g.target}${esc(g.unit || "")}</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${done ? "var(--green)" : "var(--accent)"}"></div></div>
+          </div>`;
+        }).join("") : `<div class="empty">No weekly goals yet.</div>`}
+      </div>
     `;
   },
 
@@ -275,6 +329,28 @@ const VIEWS = {
         <h2>Last 30 Days</h2>
         ${last30}
         <p class="muted" style="margin-top:10px;font-size:12px">Darker = higher discipline that day. A day counts toward your streak at ${STREAK_THRESHOLD}%+.</p>
+      </div>
+    `;
+  },
+
+  goals() {
+    const gs = S.goals || [];
+    const done = gs.filter(g => g.progress >= g.target).length;
+    return `
+      <h2 class="section-title">🎯 Weekly Goals &amp; Targets</h2>
+      <p class="muted" style="margin:-8px 0 16px;font-size:13px">Week of ${fmtDate(mondayISO())} — progress resets every Monday. ${gs.length ? `<b>${done}/${gs.length}</b> complete.` : ""}</p>
+      <div class="grid cols-3">
+        ${gs.map(goalCardHTML).join("") || `<div class="empty">No weekly goals yet. Add one below.</div>`}
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Add a weekly goal</h2>
+        <div class="row wrap">
+          <input class="input" id="ngName" placeholder="Goal name, e.g. Runs" style="flex:1;min-width:140px">
+          <input class="input" id="ngIco" placeholder="🎯" style="width:70px">
+          <input class="input" id="ngTarget" type="number" placeholder="Target" style="width:100px">
+          <input class="input" id="ngUnit" placeholder="unit (km, h…)" style="width:110px">
+          <button class="btn" id="addGoal">Add goal</button>
+        </div>
       </div>
     `;
   },
@@ -467,17 +543,23 @@ const VIEWS = {
       <button class="btn" id="saveSettings">Save settings</button>
     </div>`;
 
-    // ---- habits ----
+    // ---- habits (with weekday cadence) ----
     html += `<div class="card"><h2>🔥 Manage Habits</h2>
-      <div class="admin-grid admin-head"><span></span><span>Name</span><span>Icon</span><span>XP</span><span></span></div>
       <div id="habitRows">` +
-      S.habits.map(h => `<div class="admin-grid" data-id="${h.id}">
-        <div class="habit-ico">${h.ico}</div>
-        <input class="input" data-h-name value="${esc(h.name)}">
-        <input class="input mini" data-h-ico value="${esc(h.ico)}">
-        <input class="input mini" data-h-xp type="number" value="${h.xp}">
-        <button class="icon-btn" data-delhabit="${h.id}" title="Delete">✕</button>
-      </div>`).join("") + `</div>
+      S.habits.map(h => {
+        const days = h.days || [];
+        const wd = WD_NAMES.map((nm, i) => `<button type="button" class="wd ${(!days.length || days.includes(i)) ? "on" : ""}" data-wd="${i}">${nm[0]}</button>`).join("");
+        return `<div class="admin-item" data-id="${h.id}">
+          <div class="admin-grid">
+            <div class="habit-ico">${h.ico}</div>
+            <input class="input" data-h-name value="${esc(h.name)}">
+            <input class="input mini" data-h-ico value="${esc(h.ico)}">
+            <input class="input mini" data-h-xp type="number" value="${h.xp}">
+            <button class="icon-btn" data-delhabit="${h.id}" title="Delete">✕</button>
+          </div>
+          <div class="wd-row">${wd}<span class="muted" style="font-size:11px;margin-left:8px">pick days · all selected = daily</span></div>
+        </div>`;
+      }).join("") + `</div>
       <div class="row wrap" style="margin-top:12px">
         <input class="input" id="ahName" placeholder="New habit name" style="flex:1;min-width:140px">
         <input class="input" id="ahIco" placeholder="✨" style="width:70px">
@@ -487,49 +569,105 @@ const VIEWS = {
       </div>
     </div>`;
 
-    // ---- tasks ----
-    html += `<div class="card"><h2>✅ Manage Tasks</h2>` +
-      (S.tasks.length ? S.tasks.map(t => `<div class="admin-row" data-id="${t.id}">
+    // ---- weekly goals ----
+    html += `<div class="card"><h2>🎯 Manage Weekly Goals</h2>
+      <div class="admin-grid admin-head" style="grid-template-columns:48px 1.4fr 70px 70px auto"><span></span><span>Name</span><span>Target</span><span>Unit</span><span></span></div>
+      <div id="goalRows">` +
+      S.goals.map(g => `<div class="admin-grid" data-id="${g.id}" style="grid-template-columns:48px 1.4fr 70px 70px auto">
+        <input class="input mini" data-g-ico value="${esc(g.ico || "")}" style="width:48px">
+        <input class="input" data-g-name value="${esc(g.name)}">
+        <input class="input mini" data-g-target type="number" value="${g.target}">
+        <input class="input mini" data-g-unit value="${esc(g.unit || "")}">
+        <button class="icon-btn" data-delgoal="${g.id}">✕</button>
+      </div>`).join("") + `</div>
+      <button class="btn" id="saveGoals" style="margin-top:12px">Save goals</button>
+    </div>`;
+
+    // ---- tasks (with priority) ----
+    html += `<div class="card"><h2>✅ Manage Tasks</h2><div id="taskRows">` +
+      (S.tasks.length ? S.tasks.map(t => `<div class="admin-row" data-id="${t.id}" style="grid-template-columns:34px 1fr 96px auto">
         <div>${t.done ? "✅" : "⬜"}</div>
         <input class="input" data-t-title value="${esc(t.title)}">
+        <select class="input" data-t-prio style="width:96px">
+          ${["high", "med", "low"].map(p => `<option value="${p}" ${t.priority === p ? "selected" : ""}>${p}</option>`).join("")}
+        </select>
         <button class="icon-btn" data-deltask="${t.id}">✕</button>
-      </div>`).join("") : `<div class="empty">No tasks.</div>`) +
-      `<div class="row" style="margin-top:12px"><button class="btn soft" id="clearDone">Clear completed</button><button class="btn" id="saveTasks">Save titles</button></div>
+      </div>`).join("") : `<div class="empty">No tasks.</div>`) + `</div>
+      <div class="row" style="margin-top:12px"><button class="btn soft" id="clearDone">Clear completed</button><button class="btn" id="saveTasks">Save tasks</button></div>
     </div>`;
 
     // ---- budgets ----
     html += `<div class="card"><h2>💰 Manage Budgets</h2>
-      <div class="admin-grid admin-head"><span></span><span>Category</span><span>Limit</span><span>Spent</span><span></span></div>` +
+      <div class="admin-grid admin-head"><span></span><span>Category</span><span>Limit</span><span>Spent</span><span></span></div>
+      <div id="budgetRows">` +
       S.finance.budgets.map(b => `<div class="admin-grid" data-id="${b.id}">
         <input class="input mini" data-b-ico value="${esc(b.ico || "")}" style="width:48px">
         <input class="input" data-b-name value="${esc(b.name)}">
         <input class="input mini" data-b-limit type="number" value="${b.limit}">
         <input class="input mini" data-b-spent type="number" value="${b.spent}">
         <button class="icon-btn" data-delbudget="${b.id}">✕</button>
-      </div>`).join("") +
-      `<button class="btn" id="saveBudgets" style="margin-top:12px">Save budgets</button>
+      </div>`).join("") + `</div>
+      <div class="row wrap" style="margin-top:12px">
+        <input class="input" id="abName" placeholder="New category" style="flex:1;min-width:120px">
+        <input class="input" id="abIco" placeholder="•" style="width:60px">
+        <input class="input" id="abLimit" type="number" placeholder="Limit" style="width:110px">
+        <button class="btn soft" id="addBudgetAdmin">Add</button>
+        <button class="btn" id="saveBudgets">Save budgets</button>
+      </div>
     </div>`;
 
     // ---- health ----
-    html += `<div class="card"><h2>❤️ Manage Health Metrics</h2>` +
-      S.health.metrics.map(m => `<div class="admin-grid" data-id="${m.id}" style="grid-template-columns:48px 1.4fr 70px 70px 60px auto">
+    const mCols = "grid-template-columns:48px 1.3fr 64px 64px 50px 74px auto";
+    html += `<div class="card"><h2>❤️ Manage Health Metrics</h2><div id="metricRows">` +
+      S.health.metrics.map(m => `<div class="admin-grid" data-id="${m.id}" style="${mCols}">
         <input class="input mini" data-m-ico value="${esc(m.ico || "")}" style="width:48px">
         <input class="input" data-m-name value="${esc(m.name)}">
         <input class="input mini" data-m-value type="number" value="${m.value}">
         <input class="input mini" data-m-goal type="number" value="${m.goal}">
         <input class="input mini" data-m-unit value="${esc(m.unit || "")}" style="width:50px">
+        <select class="input mini" data-m-dir style="width:74px"><option value="up" ${m.dir !== "down" ? "selected" : ""}>up ↑</option><option value="down" ${m.dir === "down" ? "selected" : ""}>down ↓</option></select>
         <button class="icon-btn" data-delmetric="${m.id}">✕</button>
-      </div>`).join("") +
-      `<button class="btn" id="saveHealth" style="margin-top:12px">Save metrics</button>
+      </div>`).join("") + `</div>
+      <div class="row wrap" style="margin-top:12px">
+        <input class="input" id="amIco" placeholder="❤️" style="width:60px">
+        <input class="input" id="amName" placeholder="Metric name" style="flex:1;min-width:120px">
+        <input class="input" id="amValue" type="number" placeholder="Value" style="width:90px">
+        <input class="input" id="amGoal" type="number" placeholder="Goal" style="width:90px">
+        <input class="input" id="amUnit" placeholder="unit" style="width:70px">
+        <select class="input" id="amDir" style="width:90px"><option value="up">up ↑</option><option value="down">down ↓</option></select>
+        <button class="btn soft" id="addMetric">Add</button>
+        <button class="btn" id="saveHealth">Save metrics</button>
+      </div>
     </div>`;
 
-    // ---- events ----
-    html += `<div class="card"><h2>📅 Manage Events</h2>` +
-      (S.events.length ? S.events.map(e => `<div class="admin-row" data-id="${e.id}">
-        <div>📅</div>
-        <div><b>${esc(e.title)}</b> <span class="muted">${e.date} ${e.time || ""}</span></div>
+    // ---- events (editable) ----
+    const eCols = "grid-template-columns:1.4fr 140px 96px 1fr auto";
+    html += `<div class="card"><h2>📅 Manage Events</h2><div id="eventRows">` +
+      (S.events.length ? S.events.map(e => `<div class="admin-grid" data-id="${e.id}" style="${eCols}">
+        <input class="input" data-e-title value="${esc(e.title)}">
+        <input class="input" data-e-date type="date" value="${e.date}">
+        <input class="input" data-e-time type="time" value="${e.time || ""}">
+        <input class="input" data-e-loc value="${esc(e.loc || "")}" placeholder="location">
         <button class="icon-btn" data-delevent="${e.id}">✕</button>
-      </div>`).join("") : `<div class="empty">No events.</div>`) + `</div>`;
+      </div>`).join("") : `<div class="empty">No events.</div>`) + `</div>
+      <div class="row wrap" style="margin-top:12px">
+        <input class="input" id="aeTitle" placeholder="Event title" style="flex:1;min-width:140px">
+        <input class="input" id="aeDate" type="date" value="${todayISO()}" style="width:auto">
+        <input class="input" id="aeTime" type="time" value="09:00" style="width:auto">
+        <input class="input" id="aeLoc" placeholder="Location" style="width:auto">
+        <button class="btn soft" id="addEventAdmin">Add</button>
+        <button class="btn" id="saveEvents">Save events</button>
+      </div>
+    </div>`;
+
+    // ---- notes (editable) ----
+    html += `<div class="card"><h2>📝 Manage Notes</h2><div id="noteRows">` +
+      (S.notes.length ? S.notes.slice().reverse().map(n => `<div class="admin-item" data-id="${n.id}">
+        <div class="row"><span class="muted" style="font-size:12px;flex:1">${fmtDate(n.date)}</span><button class="icon-btn" data-delnote="${n.id}">✕</button></div>
+        <textarea class="input" data-n-body rows="2">${esc(n.body)}</textarea>
+      </div>`).join("") : `<div class="empty">No notes.</div>`) + `</div>
+      <button class="btn" id="saveNotes" style="margin-top:12px">Save notes</button>
+    </div>`;
 
     // ---- danger zone ----
     html += `<div class="card danger-zone"><h2>⚠️ Danger Zone</h2>
@@ -549,15 +687,18 @@ function kpi(ico, val, label, sub) {
   return `<div class="card kpi"><div class="kpi-ico">${ico}</div><div class="kpi-val">${val}</div><div class="kpi-label">${esc(label)}</div><div class="kpi-sub">${sub || ""}</div></div>`;
 }
 function habitListHTML(compact) {
-  const day = ensureDay(todayISO());
-  return S.habits.map(h => {
+  const iso = todayISO();
+  const day = ensureDay(iso);
+  const todays = scheduledHabits(iso);
+  if (!todays.length) return `<div class="empty">No habits scheduled for today — rest day. 🌿</div>`;
+  return todays.map(h => {
     const done = !!day.habits[h.id];
     const st = habitStreak(h.id);
     return `<div class="habit">
       <div class="habit-ico">${h.ico}</div>
       <div>
         <div class="habit-name">${esc(h.name)}</div>
-        ${compact ? "" : `<div class="habit-meta">+${h.xp} XP · daily</div>`}
+        ${compact ? "" : `<div class="habit-meta">+${h.xp} XP · ${esc(cadenceLabel(h))}</div>`}
       </div>
       <div class="streak-chip">${st > 0 ? "🔥 " + st : ""}</div>
       <button class="check ${done ? "done" : ""}" data-habit="${h.id}">✓</button>
@@ -566,9 +707,19 @@ function habitListHTML(compact) {
   }).join("");
 }
 function habitStreak(id) {
+  const h = S.habits.find(x => x.id === id);
+  if (!h) return 0;
   let streak = 0, d = new Date();
-  if (!(S.log[isoOf(d)]?.habits?.[id])) d.setDate(d.getDate() - 1);
-  while (S.log[isoOf(d)]?.habits?.[id]) { streak++; d.setDate(d.getDate() - 1); }
+  // Only scheduled days count; today not-yet-done doesn't break the streak.
+  for (let i = 0; i < 400; i++) {
+    const iso = isoOf(d);
+    if (habitScheduled(h, iso)) {
+      if (S.log[iso]?.habits?.[id]) streak++;
+      else if (i === 0) { /* today pending — keep going */ }
+      else break;
+    }
+    d.setDate(d.getDate() - 1);
+  }
   return streak;
 }
 function taskHTML(t) {
@@ -610,6 +761,22 @@ function metricHTML(m) {
 }
 function noteHTML(n) {
   return `<div class="note"><div class="note-date">${fmtDate(n.date)} <button class="icon-btn" data-delnote="${n.id}" style="float:right">✕</button></div><div class="note-body">${esc(n.body)}</div></div>`;
+}
+function goalCardHTML(g) {
+  const pct = Math.min(100, Math.round((g.progress / g.target) * 100));
+  const done = g.progress >= g.target;
+  return `<div class="card">
+    <h2>${g.ico || "🎯"} ${esc(g.name)} ${done ? "<span class='up' style='font-size:12px'>done ✓</span>" : ""}</h2>
+    <div class="kpi-val" style="font-size:26px">${g.progress}<span class="muted" style="font-size:15px">/${g.target}${esc(g.unit || "")}</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${done ? "var(--green)" : "var(--accent)"}"></div></div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn sm soft" data-goaldec="${g.id}" title="−1">−</button>
+      <input class="input" data-goalset="${g.id}" type="number" value="${g.progress}" style="width:76px;height:34px">
+      <button class="btn sm soft" data-goalinc="${g.id}" title="+1">+</button>
+      <span class="h-spacer" style="flex:1"></span>
+      ${done ? "" : `<button class="btn sm" data-goaldone="${g.id}">Complete</button>`}
+    </div>
+  </div>`;
 }
 
 /* ---------- Heatmap ---------- */
@@ -767,6 +934,22 @@ function bindViewEvents() {
   root.querySelectorAll("[data-delevent]").forEach(b => b.onclick = () => {
     S.events = S.events.filter(x => x.id !== b.dataset.delevent); saveState(); render();
   });
+  root.querySelectorAll("[data-delgoal]").forEach(b => b.onclick = () => {
+    S.goals = S.goals.filter(x => x.id !== b.dataset.delgoal); saveState(); render();
+  });
+
+  // ---- weekly goals ----
+  const goalById = id => S.goals.find(g => g.id === id);
+  root.querySelectorAll("[data-goalinc]").forEach(b => b.onclick = () => { const g = goalById(b.dataset.goalinc); bumpGoal(g, g.progress + 1); });
+  root.querySelectorAll("[data-goaldec]").forEach(b => b.onclick = () => { const g = goalById(b.dataset.goaldec); bumpGoal(g, g.progress - 1); });
+  root.querySelectorAll("[data-goaldone]").forEach(b => b.onclick = () => { const g = goalById(b.dataset.goaldone); bumpGoal(g, g.target); });
+  root.querySelectorAll("[data-goalset]").forEach(el => el.onchange = () => { const g = goalById(el.dataset.goalset); bumpGoal(g, parseFloat(el.value) || 0); });
+  on(root, "addGoal", () => {
+    const name = val("ngName"), target = num("ngTarget", 0);
+    if (!name || !target) return;
+    S.goals.push({ id: uid(), name, ico: val("ngIco") || "🎯", target, unit: val("ngUnit"), progress: 0, weekStart: mondayISO(), completedAwarded: false });
+    saveState(); render();
+  });
 
   if (currentView === "admin") bindAdmin(root);
 }
@@ -795,58 +978,108 @@ function bindAdmin(root) {
     saveState(); render(); toast("✅", "Settings saved", "");
   });
 
-  // habits
+  // habits (+ weekday cadence toggles)
+  root.querySelectorAll(".wd-row .wd").forEach(btn => btn.onclick = () => btn.classList.toggle("on"));
   on(root, "addHabitAdmin", () => {
     const name = val("ahName"); if (!name) return;
-    S.habits.push({ id: uid(), name, ico: val("ahIco") || "✨", xp: num("ahXp", 10), cadence: "daily" });
+    S.habits.push({ id: uid(), name, ico: val("ahIco") || "✨", xp: num("ahXp", 10), days: [] });
     saveState(); render();
   });
   on(root, "saveHabits", () => {
-    root.querySelectorAll("#habitRows .admin-grid").forEach(rowEl => {
-      const h = S.habits.find(x => x.id === rowEl.dataset.id); if (!h) return;
-      h.name = rowEl.querySelector("[data-h-name]").value.trim() || h.name;
-      h.ico = rowEl.querySelector("[data-h-ico]").value.trim() || h.ico;
-      h.xp = parseInt(rowEl.querySelector("[data-h-xp]").value) || h.xp;
+    root.querySelectorAll("#habitRows .admin-item").forEach(item => {
+      const h = S.habits.find(x => x.id === item.dataset.id); if (!h) return;
+      h.name = item.querySelector("[data-h-name]").value.trim() || h.name;
+      h.ico = item.querySelector("[data-h-ico]").value.trim() || h.ico;
+      h.xp = parseInt(item.querySelector("[data-h-xp]").value) || h.xp;
+      const on = [...item.querySelectorAll(".wd.on")].map(b => parseInt(b.dataset.wd));
+      h.days = on.length === 7 ? [] : on;   // all days = daily
     });
     saveState(); render(); toast("✅", "Habits saved", "");
   });
 
-  // tasks
+  // weekly goals
+  on(root, "saveGoals", () => {
+    root.querySelectorAll("#goalRows .admin-grid").forEach(rowEl => {
+      const g = S.goals.find(x => x.id === rowEl.dataset.id); if (!g) return;
+      g.ico = rowEl.querySelector("[data-g-ico]").value.trim() || g.ico;
+      g.name = rowEl.querySelector("[data-g-name]").value.trim() || g.name;
+      g.target = parseFloat(rowEl.querySelector("[data-g-target]").value) || g.target;
+      g.unit = rowEl.querySelector("[data-g-unit]").value.trim();
+    });
+    saveState(); render(); toast("✅", "Goals saved", "");
+  });
+
+  // tasks (+ priority)
   on(root, "saveTasks", () => {
-    root.querySelectorAll(".admin-row[data-id]").forEach(rowEl => {
-      const inp = rowEl.querySelector("[data-t-title]"); if (!inp) return;
-      const t = S.tasks.find(x => x.id === rowEl.dataset.id);
-      if (t) t.title = inp.value.trim() || t.title;
+    root.querySelectorAll("#taskRows .admin-row").forEach(rowEl => {
+      const t = S.tasks.find(x => x.id === rowEl.dataset.id); if (!t) return;
+      t.title = rowEl.querySelector("[data-t-title]").value.trim() || t.title;
+      t.priority = rowEl.querySelector("[data-t-prio]").value;
     });
     saveState(); render(); toast("✅", "Tasks saved", "");
   });
   on(root, "clearDone", () => { S.tasks = S.tasks.filter(t => !t.done); saveState(); render(); });
 
   // budgets
+  on(root, "addBudgetAdmin", () => {
+    const name = val("abName"), limit = num("abLimit", 0); if (!name || !limit) return;
+    S.finance.budgets.push({ id: uid(), name, ico: val("abIco") || "•", limit, spent: 0 });
+    saveState(); render();
+  });
   on(root, "saveBudgets", () => {
-    root.querySelectorAll(".admin-grid[data-id]").forEach(rowEl => {
+    root.querySelectorAll("#budgetRows .admin-grid").forEach(rowEl => {
       const b = S.finance.budgets.find(x => x.id === rowEl.dataset.id); if (!b) return;
-      const name = rowEl.querySelector("[data-b-name]"); if (!name) return;
       b.ico = rowEl.querySelector("[data-b-ico]").value.trim() || b.ico;
-      b.name = name.value.trim() || b.name;
+      b.name = rowEl.querySelector("[data-b-name]").value.trim() || b.name;
       b.limit = parseFloat(rowEl.querySelector("[data-b-limit]").value) || b.limit;
       b.spent = parseFloat(rowEl.querySelector("[data-b-spent]").value) || 0;
     });
     saveState(); render(); toast("✅", "Budgets saved", "");
   });
 
-  // health
+  // health (+ add, direction)
+  on(root, "addMetric", () => {
+    const name = val("amName"); if (!name) return;
+    S.health.metrics.push({ id: uid(), name, ico: val("amIco") || "•", value: num("amValue", 0), goal: num("amGoal", 0), unit: val("amUnit"), dir: document.getElementById("amDir").value });
+    saveState(); render();
+  });
   on(root, "saveHealth", () => {
-    root.querySelectorAll(".admin-grid[data-id]").forEach(rowEl => {
+    root.querySelectorAll("#metricRows .admin-grid").forEach(rowEl => {
       const m = S.health.metrics.find(x => x.id === rowEl.dataset.id); if (!m) return;
-      const nameEl = rowEl.querySelector("[data-m-name]"); if (!nameEl) return;
       m.ico = rowEl.querySelector("[data-m-ico]").value.trim() || m.ico;
-      m.name = nameEl.value.trim() || m.name;
+      m.name = rowEl.querySelector("[data-m-name]").value.trim() || m.name;
       m.value = parseFloat(rowEl.querySelector("[data-m-value]").value) || 0;
       m.goal = parseFloat(rowEl.querySelector("[data-m-goal]").value) || m.goal;
       m.unit = rowEl.querySelector("[data-m-unit]").value.trim();
+      m.dir = rowEl.querySelector("[data-m-dir]").value;
     });
     saveState(); render(); toast("✅", "Metrics saved", "");
+  });
+
+  // events (+ add, edit)
+  on(root, "addEventAdmin", () => {
+    const title = val("aeTitle"); if (!title) return;
+    S.events.push({ id: uid(), title, date: val("aeDate"), time: val("aeTime"), loc: val("aeLoc") });
+    saveState(); render();
+  });
+  on(root, "saveEvents", () => {
+    root.querySelectorAll("#eventRows .admin-grid").forEach(rowEl => {
+      const e = S.events.find(x => x.id === rowEl.dataset.id); if (!e) return;
+      e.title = rowEl.querySelector("[data-e-title]").value.trim() || e.title;
+      e.date = rowEl.querySelector("[data-e-date]").value || e.date;
+      e.time = rowEl.querySelector("[data-e-time]").value;
+      e.loc = rowEl.querySelector("[data-e-loc]").value.trim();
+    });
+    saveState(); render(); toast("✅", "Events saved", "");
+  });
+
+  // notes (edit)
+  on(root, "saveNotes", () => {
+    root.querySelectorAll("#noteRows .admin-item").forEach(item => {
+      const n = S.notes.find(x => x.id === item.dataset.id); if (!n) return;
+      n.body = item.querySelector("[data-n-body]").value;
+    });
+    saveState(); render(); toast("✅", "Notes saved", "");
   });
 
   // danger zone

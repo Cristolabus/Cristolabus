@@ -21,19 +21,28 @@ const SEED = {
     streakThreshold: 60,   // % of habits done for a day to count toward streak
     noteXP: 5,             // XP for saving a note
     goalXP: 15,            // XP for hitting a health goal
+    weeklyGoalXP: 40,      // XP for completing a weekly goal/target
   },
 
   // Daily discipline log: { "2026-06-26": { habits: {habitId: true}, xpEarned: 40 } }
   // Seeded with a realistic recent history so Analytics isn't blank on day one.
   log: seedLog(),
 
+  // days: weekday numbers (0=Sun … 6=Sat) the habit is scheduled. [] = every day.
   habits: [
-    { id: "h1", name: "Wake up before 7:00", ico: "🌅", xp: 15, cadence: "daily" },
-    { id: "h2", name: "Workout / move 30 min", ico: "🏋️", xp: 20, cadence: "daily" },
-    { id: "h3", name: "Deep work 90 min", ico: "🧠", xp: 25, cadence: "daily" },
-    { id: "h4", name: "Read 20 pages", ico: "📚", xp: 10, cadence: "daily" },
-    { id: "h5", name: "No screens after 23:00", ico: "🌙", xp: 10, cadence: "daily" },
-    { id: "h6", name: "Track expenses", ico: "💸", xp: 10, cadence: "daily" },
+    { id: "h1", name: "Wake up before 7:00", ico: "🌅", xp: 15, days: [] },
+    { id: "h2", name: "Workout / move 30 min", ico: "🏋️", xp: 20, days: [1, 3, 5] },
+    { id: "h3", name: "Deep work 90 min", ico: "🧠", xp: 25, days: [1, 2, 3, 4, 5] },
+    { id: "h4", name: "Read 20 pages", ico: "📚", xp: 10, days: [] },
+    { id: "h5", name: "No screens after 23:00", ico: "🌙", xp: 10, days: [] },
+    { id: "h6", name: "Track expenses", ico: "💸", xp: 10, days: [] },
+  ],
+
+  // Weekly goals/targets — progress resets every Monday.
+  goals: [
+    { id: "g1", name: "Workouts", ico: "🏋️", target: 4, unit: "", progress: 2, weekStart: mondayISO() },
+    { id: "g2", name: "Reading", ico: "📚", target: 100, unit: "pg", progress: 35, weekStart: mondayISO() },
+    { id: "g3", name: "Deep work", ico: "🧠", target: 15, unit: "h", progress: 6, weekStart: mondayISO() },
   ],
 
   tasks: [
@@ -88,6 +97,13 @@ function addDaysISO(n) {
   return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
 }
 function pad(n) { return String(n).padStart(2, "0"); }
+// ISO date of the Monday of the given (or current) week.
+function mondayISO(date) {
+  const d = date ? new Date(date) : new Date();
+  const offset = (d.getDay() + 6) % 7;   // days since Monday
+  d.setDate(d.getDate() - offset);
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
 
 // Deterministic demo history for the last 13 days (excludes today), showing a
 // gentle upward consistency trend. Replaced as soon as you start checking habits.

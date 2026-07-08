@@ -57,7 +57,8 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 | Section | What it does |
 |---|---|
 | 🏠 **Overview** | Daily snapshot: streak, discipline %, level, priority tasks & next events |
-| 🔥 **Habits & Discipline** | Check off habits, build streaks, 30-day consistency heatmap, inline delete |
+| 🔥 **Habits & Discipline** | Check off habits (daily or specific weekdays), build streaks, 30-day consistency heatmap, inline delete |
+| 🎯 **Weekly Goals** | Set weekly targets (e.g. 4 workouts), track progress with +/−, auto-reset every Monday, XP on completion |
 | ✅ **Tasks** | Prioritized to-dos; completing them earns XP |
 | 📅 **Calendar** | Upcoming events grouped by day |
 | 💰 **Finance** | Monthly budgets with spend tracking and progress bars |
@@ -65,7 +66,7 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 | 📝 **Notes** | Quick journal / scratchpad |
 | 📊 **Analytics** | Charts: XP per day, discipline trend over time, and 30-day habit consistency |
 | 🏆 **Achievements** | Unlockable badges for milestones |
-| ⚙️ **Admin** | Login, edit profile/currency/income, tune XP rules & streak threshold, full add/edit/delete for habits, tasks, budgets, health metrics & events, export backup, wipe & reset |
+| ⚙️ **Admin** | Login, edit profile/currency/income, tune XP rules & streak threshold, full add/edit/delete for habits (incl. weekday cadence), weekly goals, tasks (incl. priority), budgets, health metrics (incl. direction), events & notes, export backup, wipe & reset |
 
 ## The gamification system
 
@@ -83,8 +84,15 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 | `GET` | `/api/state` | — | Full dashboard state (`204` if none yet) |
 | `PUT` | `/api/state` | Bearer | Save full state |
 | `DELETE` | `/api/state` | Bearer | Wipe state |
+| `POST` | `/api/collection/:name` | Bearer | Create one item in a collection (id auto-assigned) |
+| `PUT` | `/api/collection/:name/:id` | Bearer | Modify fields of one item |
+| `DELETE` | `/api/collection/:name/:id` | Bearer | Delete one item |
 
-The frontend caches to `localStorage` too, so a brief server hiccup never loses data.
+`:name` is one of `habits`, `tasks`, `events`, `notes`, `goals`, `budgets`, `metrics` — giving every
+entity a real create / modify / delete endpoint for scripting and automation.
+
+The frontend caches to `localStorage` too, and flushes any pending change on page-hide, so a brief
+server hiccup or a quick reload never loses data.
 
 ## Files
 
