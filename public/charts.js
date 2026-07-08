@@ -88,20 +88,23 @@ const Charts = (() => {
     </svg>`;
   }
 
-  // Horizontal bars with direct labels. series: [{label, value, tip}] (value 0..100)
-  function hbars(series, { color = "#3ddc97", unit = "%" } = {}) {
+  // Horizontal bars with direct labels. series: [{label, value, tip, color}]
+  // Options: max (defaults to 100 or the data max), unit, valueFmt (label formatter).
+  function hbars(series, { color = "#3ddc97", unit = "%", max, valueFmt } = {}) {
     const { TXT, GRID, INK } = theme();
-    const rowH = 30, w = 480, padL = 4, labelW = 150, valW = 44;
+    const rowH = 30, w = 480, padL = 4, labelW = 150, valW = 64;
     const barMax = w - labelW - valW - padL;
+    const cap = max || Math.max(100, ...series.map(s => s.value));
+    const fmt = valueFmt || (v => v + unit);
     let rows = "";
     series.forEach((s, i) => {
       const y = i * rowH;
-      const bw = (Math.min(100, s.value) / 100) * barMax;
+      const bw = (Math.min(cap, s.value) / cap) * barMax;
       rows += `<text x="${padL}" y="${y + rowH / 2 + 4}" font-size="12" fill="${INK}">${esc(s.label)}</text>`;
       rows += `<rect x="${labelW}" y="${y + 7}" width="${barMax}" height="${rowH - 16}" rx="4" fill="${GRID}"/>`;
-      rows += `<rect x="${labelW}" y="${y + 7}" width="${Math.max(0, bw)}" height="${rowH - 16}" rx="4" fill="${color}"
-        data-tip="${esc(s.tip || (s.label + ": " + s.value + unit))}" class="ch-bar"/>`;
-      rows += `<text x="${w - 2}" y="${y + rowH / 2 + 4}" text-anchor="end" font-size="11" fill="${TXT}">${s.value}${unit}</text>`;
+      rows += `<rect x="${labelW}" y="${y + 7}" width="${Math.max(0, bw)}" height="${rowH - 16}" rx="4" fill="${s.color || color}"
+        data-tip="${esc(s.tip || (s.label + ": " + fmt(s.value)))}" class="ch-bar"/>`;
+      rows += `<text x="${w - 2}" y="${y + rowH / 2 + 4}" text-anchor="end" font-size="11" fill="${TXT}">${esc(fmt(s.value))}</text>`;
     });
     return `<svg viewBox="0 0 ${w} ${series.length * rowH}" width="100%" height="${series.length * rowH}" preserveAspectRatio="xMinYMin meet" role="img">${rows}</svg>`;
   }

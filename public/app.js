@@ -4,7 +4,7 @@
 /* ---------- State management ---------- */
 function ensureSettings() {
   if (!S.settings) S.settings = {};
-  const defaults = { streakThreshold: 60, noteXP: 5, goalXP: 15, weeklyGoalXP: 40, theme: "dark" };
+  const defaults = { streakThreshold: 60, noteXP: 5, goalXP: 15, weeklyGoalXP: 40, theme: "dark", remindersEnabled: false };
   for (const k in defaults) if (S.settings[k] === undefined) S.settings[k] = defaults[k];
 }
 // Backfill any missing top-level structures so a partial/old saved state
@@ -390,8 +390,9 @@ const VIEWS = {
           <input class="input" id="evTime" type="time" value="09:00" style="width:auto" />
           <input class="input" id="evLoc" placeholder="Location" style="width:auto" />
           <button class="btn" id="addEvent">Add</button>
+          ${(Store.isOnline() && Store.isAuthed()) ? `<button class="btn soft" id="calSyncBtn">🔄 Sync Google</button>` : ""}
         </div>
-        <p class="muted" style="margin-top:10px;font-size:12px">💡 Tip: a Claude Code session can sync your real Google Calendar into this view.</p>
+        <p class="muted" style="margin-top:10px;font-size:12px">💡 Connect your Google Calendar in <b>Admin → Google Calendar Sync</b> with its private iCal URL.</p>
       </div>
       <div class="card" style="margin-top:18px">
         ${Object.keys(grouped).length ? Object.entries(grouped).map(([date, evs]) =>
@@ -406,12 +407,27 @@ const VIEWS = {
     const totalSpent = f.budgets.reduce((s, b) => s + b.spent, 0);
     const totalLimit = f.budgets.reduce((s, b) => s + b.limit, 0);
     const remaining = f.monthlyIncome - totalSpent;
+    const spendSeries = f.budgets.slice().sort((a, b) => b.spent - a.spent).map(b => ({
+      label: b.name, value: b.spent,
+      color: b.spent > b.limit ? "#ff5d73" : "#7c5cff",
+      tip: `${b.name}: ${money(b.spent)} of ${money(b.limit)}`,
+    }));
+    const savedPct = f.monthlyIncome ? Math.round((remaining / f.monthlyIncome) * 100) : 0;
     return `
       <h2 class="section-title">💰 Finance</h2>
-      <div class="grid cols-3">
+      <div class="grid cols-4">
         ${kpi("💵", money(f.monthlyIncome), "Monthly income", "")}
         ${kpi("💸", money(totalSpent), "Spent this month", `of ${money(totalLimit)} budgeted`)}
         ${kpi("🏦", money(remaining), "Remaining", remaining >= 0 ? "<span class='up'>In the green</span>" : "<span class='down'>Over budget</span>")}
+        ${kpi("📈", savedPct + "%", "Left to save", "of income")}
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>💸 Spending by category</h2>
+        ${spendSeries.length ? `<div class="chart-wrap">${Charts.hbars(spendSeries, { max: Math.max(...f.budgets.map(b => b.limit), 1), valueFmt: money })}</div>` : `<div class="empty">No budgets yet.</div>`}
+        <div class="chart-legend">
+          <span><span class="dot" style="background:#7c5cff"></span>within budget</span>
+          <span><span class="dot" style="background:#ff5d73"></span>over budget</span>
+        </div>
       </div>
       <div class="card" style="margin-top:18px">
         <h2>Budgets</h2>
@@ -541,6 +557,28 @@ const VIEWS = {
         <div class="field"><label>Goal XP</label><input class="input" id="setGoalXP" type="number" value="${S.settings.goalXP}"></div>
       </div>
       <button class="btn" id="saveSettings">Save settings</button>
+    </div>`;
+
+    // ---- Google Calendar sync ----
+    html += `<div class="card"><h2>🔗 Google Calendar Sync</h2>
+      <div class="field"><label>Private iCal URL (Google Calendar → Settings → "Secret address in iCal format")</label>
+        <input class="input" id="setIcs" value="${esc(S.settings.icsUrl || "")}" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"></div>
+      <div class="row wrap">
+        <button class="btn" id="syncCalBtn">🔄 Sync now</button>
+        <button class="btn soft" id="saveIcs">Save URL</button>
+        <span class="muted" style="font-size:12px">${S.settings.lastCalendarSync ? "Last synced: " + new Date(S.settings.lastCalendarSync).toLocaleString() : "Never synced"}</span>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Pulls your real events into the Calendar. Synced events are replaced on each sync; manually-added events are kept.</p>
+    </div>`;
+
+    // ---- reminders ----
+    const perm = (typeof Notification !== "undefined") ? Notification.permission : "unsupported";
+    html += `<div class="card"><h2>🔔 Reminders</h2>
+      <p class="muted" style="font-size:13px">Get a browser notification 5 minutes before a calendar event starts (while the dashboard is open).</p>
+      <div class="row wrap" style="margin-top:8px">
+        <button class="btn" id="enableReminders">${(S.settings.remindersEnabled && perm === "granted") ? "✓ Reminders on" : "Enable reminders"}</button>
+        <span class="muted" style="font-size:12px">Permission: ${perm}</span>
+      </div>
     </div>`;
 
     // ---- habits (with weekday cadence) ----
@@ -879,6 +917,13 @@ function bindViewEvents() {
     S.events.push({ id: uid(), title, date: val("evDate"), time: val("evTime"), loc: val("evLoc") });
     saveState(); render();
   });
+  on(root, "calSyncBtn", async () => {
+    if (!S.settings.icsUrl) { toast("⚠️", "No calendar URL", "Set it in Admin → Google Calendar Sync."); switchView("admin"); return; }
+    toast("🔄", "Syncing…", "Fetching your calendar");
+    const r = await Store.syncCalendar(S.settings.icsUrl);
+    if (r.ok) { S = await Store.load(SEED); normalizeState(); scheduleReminders(); render(); toast("✅", "Calendar synced", r.imported + " events imported"); }
+    else toast("⚠️", "Sync failed", r.error);
+  });
 
   // budgets
   root.querySelectorAll("[data-addspend]").forEach(b => b.onclick = () => {
@@ -975,8 +1020,24 @@ function bindAdmin(root) {
     S.settings.streakThreshold = clamp(num("setThreshold", 60), 1, 100);
     S.settings.noteXP = num("setNoteXP", 5);
     S.settings.goalXP = num("setGoalXP", 15);
+    S.settings.icsUrl = val("setIcs");
     saveState(); render(); toast("✅", "Settings saved", "");
   });
+
+  // calendar sync
+  on(root, "saveIcs", () => { S.settings.icsUrl = val("setIcs"); saveState(); render(); toast("✅", "URL saved", ""); });
+  on(root, "syncCalBtn", async () => {
+    const url = val("setIcs");
+    if (!url) return toast("⚠️", "No URL", "Paste your private iCal URL first.");
+    S.settings.icsUrl = url; saveState();
+    toast("🔄", "Syncing…", "Fetching your calendar");
+    const r = await Store.syncCalendar(url);
+    if (r.ok) { S = await Store.load(SEED); normalizeState(); scheduleReminders(); render(); toast("✅", "Calendar synced", r.imported + " events imported"); }
+    else toast("⚠️", "Sync failed", r.error);
+  });
+
+  // reminders
+  on(root, "enableReminders", enableReminders);
 
   // habits (+ weekday cadence toggles)
   root.querySelectorAll(".wd-row .wd").forEach(btn => btn.onclick = () => btn.classList.toggle("on"));
@@ -1123,6 +1184,36 @@ function toggleTheme() {
   saveState();
 }
 
+/* ---------- Reminders (browser notifications for today's events) ---------- */
+let reminderTimers = [];
+function scheduleReminders() {
+  reminderTimers.forEach(clearTimeout);
+  reminderTimers = [];
+  if (!S.settings.remindersEnabled || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const today = todayISO();
+  const now = Date.now();
+  const LEAD = 5 * 60000; // notify 5 min before
+  S.events.filter(e => e.date === today && e.time).forEach(e => {
+    const [h, m] = e.time.split(":").map(Number);
+    const when = new Date(); when.setHours(h, m, 0, 0);
+    const ms = when.getTime() - LEAD - now;
+    if (ms > 0 && ms < 24 * 3600000) {
+      reminderTimers.push(setTimeout(() => {
+        try { new Notification("⏰ " + e.title, { body: e.time + (e.loc ? " · " + e.loc : ""), icon: "icon.svg" }); } catch (_) {}
+      }, ms));
+    }
+  });
+}
+async function enableReminders() {
+  if (typeof Notification === "undefined") { toast("⚠️", "Unsupported", "This browser has no notifications."); return; }
+  let perm = Notification.permission;
+  if (perm !== "granted") perm = await Notification.requestPermission();
+  if (perm === "granted") {
+    S.settings.remindersEnabled = true; saveState(); scheduleReminders(); render();
+    toast("🔔", "Reminders on", "You'll be nudged before events.");
+  } else { toast("⚠️", "Blocked", "Allow notifications in your browser settings."); }
+}
+
 /* ---------- Global controls ---------- */
 async function setup() {
   await Store.init();
@@ -1163,6 +1254,7 @@ async function setup() {
 
   checkAchievements();
   render();
+  scheduleReminders();
 }
 
 document.addEventListener("DOMContentLoaded", setup);

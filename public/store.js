@@ -90,10 +90,22 @@ const Store = (() => {
     } catch { /* offline blip — localStorage still has it */ }
   }
 
+  // Trigger a server-side Google Calendar (ICS) sync.
+  async function syncCalendar(url) {
+    if (!online) return { ok: false, error: "Calendar sync needs the server running." };
+    if (!token) return { ok: false, error: "Log in first to sync." };
+    try {
+      const res = await api("/api/sync/calendar", { method: "POST", body: JSON.stringify({ url: url || undefined }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error || "Sync failed" };
+      return Object.assign({ ok: true }, data);
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+
   async function wipeServer() {
     if (online && token) { try { await api("/api/state", { method: "DELETE" }); } catch {} }
     localStorage.removeItem(LS_KEY);
   }
 
-  return { init, isOnline, isAuthed, login, logout, load, save, pushNow, wipeServer };
+  return { init, isOnline, isAuthed, login, logout, load, save, pushNow, wipeServer, syncCalendar };
 })();

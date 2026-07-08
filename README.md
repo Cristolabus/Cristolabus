@@ -66,8 +66,8 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 | 🔥 **Habits & Discipline** | Check off habits (daily or specific weekdays), build streaks, 30-day consistency heatmap, inline delete |
 | 🎯 **Weekly Goals** | Set weekly targets (e.g. 4 workouts), track progress with +/−, auto-reset every Monday, XP on completion |
 | ✅ **Tasks** | Prioritized to-dos; completing them earns XP |
-| 📅 **Calendar** | Upcoming events grouped by day |
-| 💰 **Finance** | Monthly budgets with spend tracking and progress bars |
+| 📅 **Calendar** | Upcoming events grouped by day; one-click **Google Calendar sync** (server mode) |
+| 💰 **Finance** | Monthly budgets with spend tracking, progress bars, and a spending-by-category chart |
 | ❤️ **Health** | Sleep, steps, water, weight vs. goals |
 | 📝 **Notes** | Quick journal / scratchpad |
 | 📊 **Analytics** | Charts: XP per day, discipline trend over time, and 30-day habit consistency |
@@ -97,6 +97,21 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 `:name` is one of `habits`, `tasks`, `events`, `notes`, `goals`, `budgets`, `metrics` — giving every
 entity a real create / modify / delete endpoint for scripting and automation.
 
+| `POST` | `/api/sync/calendar` | Bearer | Fetch the saved private iCal URL and merge events (Google Calendar sync) |
+
+## Google Calendar sync
+
+In **Admin → Google Calendar Sync**, paste your calendar's **private iCal URL**
+(Google Calendar → *Settings → Settings for my calendars → Integrate calendar →
+Secret address in iCal format*) and hit **Sync now** (or **Sync Google** on the
+Calendar view). The server fetches and parses the feed, replacing previously-synced
+events while keeping ones you added by hand. Requires server mode + login.
+
+## Reminders
+
+In **Admin → Reminders**, enable browser notifications to get a nudge 5 minutes
+before each of today's timed events (while the dashboard is open).
+
 The frontend caches to `localStorage` too, and flushes any pending change on page-hide, so a brief
 server hiccup or a quick reload never loses data.
 
@@ -106,6 +121,7 @@ server hiccup or a quick reload never loses data.
 server/
   index.js     Express server + REST API + static hosting
   db.js        SQLite persistence (better-sqlite3)
+  ics.js       iCalendar (.ics) parser for Google Calendar sync
 public/
   index.html   layout & shell
   styles.css   theme & components

@@ -12,6 +12,7 @@ const path = require("path");
 const crypto = require("crypto");
 const express = require("express");
 const db = require("./db");
+const { parseICS } = require("./ics");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -116,6 +117,36 @@ app.delete("/api/collection/:name/:id", requireAuth, (req, res) => {
   const [removed] = ctx.arr.splice(idx, 1);
   db.saveState(ctx.state);
   res.json({ ok: true, removed });
+});
+
+/* ---- Google Calendar (ICS) sync ----
+ * Fetches the private iCal URL saved in settings.icsUrl, parses upcoming
+ * events, and merges them in (replacing previously-synced ones, keeping
+ * manually-added events). Body may override the URL for a one-off sync.
+ */
+app.post("/api/sync/calendar", requireAuth, async (req, res) => {
+  const state = db.getState();
+  if (!state) return res.status(409).json({ error: "No state yet — save the dashboard first." });
+  const url = (req.body && req.body.url) || (state.settings && state.settings.icsUrl);
+  if (!url) return res.status(400).json({ error: "No calendar URL set. Add your private iCal URL in Admin." });
+  try {
+    const r = await fetch(url, { redirect: "follow" });
+    if (!r.ok) return res.status(502).json({ error: "Calendar fetch failed (HTTP " + r.status + ")." });
+    const text = await r.text();
+    const parsed = parseICS(text);
+    // Keep only future-ish events (from 30 days ago) to avoid unbounded growth.
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30);
+    const cutoffISO = cutoff.toISOString().slice(0, 10);
+    const fresh = parsed.filter(e => e.date >= cutoffISO);
+    if (!Array.isArray(state.events)) state.events = [];
+    const manual = state.events.filter(e => e.source !== "ics");
+    state.events = manual.concat(fresh);
+    if (state.settings) state.settings.icsUrl = url, state.settings.lastCalendarSync = new Date().toISOString();
+    db.saveState(state);
+    res.json({ ok: true, imported: fresh.length, total: state.events.length });
+  } catch (e) {
+    res.status(502).json({ error: "Could not reach calendar URL: " + e.message });
+  }
 });
 
 // ---- Static frontend ----
