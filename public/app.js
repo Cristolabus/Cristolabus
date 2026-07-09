@@ -589,29 +589,19 @@ const VIEWS = {
 
   admin() {
     const online = Store.isOnline();
-    const authed = Store.isAuthed();
-    const locked = online && !authed;
 
     let html = `<h2 class="section-title">⚙️ Admin &amp; Settings</h2>`;
 
-    // ---- backend / auth status ----
-    html += `<div class="card"><h2>🔌 Backend <span class="h-spacer"></span>
-      <span class="badge ${online ? "on" : "off"}">${online ? "Server connected" : "Offline — local only"}</span></h2>`;
-    if (online && authed) {
-      html += `<div class="row"><p class="muted" style="font-size:13px;flex:1">Admin logged in — every change syncs to the SQLite database.</p>
+    // ---- account / backend status ----
+    html += `<div class="card"><h2>🔌 Account <span class="h-spacer"></span>
+      <span class="badge ${online ? "on" : "off"}">${online ? "Signed in" : "Offline — local only"}</span></h2>`;
+    if (online) {
+      html += `<div class="row"><p class="muted" style="font-size:13px;flex:1">Signed in as <b>${esc(Store.getUsername() || "user")}</b> — your data is private to this account and synced to the database.</p>
         <button class="btn sm soft" id="logoutBtn">Log out</button></div>`;
-    } else if (online) {
-      html += `<div class="login-box">
-        <div class="field"><label>Admin password</label><input class="input" id="adminPw" type="password" placeholder="Enter admin password" /></div>
-        <button class="btn" id="loginBtn">Log in</button>
-        <p class="muted" style="font-size:12px;margin-top:8px">Default is <b>admin</b> (set <code>ADMIN_PASSWORD</code> on the server to change). The dashboard is read-only until you log in.</p>
-      </div>`;
     } else {
-      html += `<p class="muted" style="font-size:13px">No server detected — you're editing local browser data. Run <code>npm start</code> for database-backed storage with login.</p>`;
+      html += `<p class="muted" style="font-size:13px">No server detected — you're editing local browser data. Run <code>npm start</code> for multi-user accounts with database storage.</p>`;
     }
     html += `</div>`;
-
-    if (locked) return html + `<div class="empty">🔒 Log in above to manage your data.</div>`;
 
     // ---- profile & rules ----
     html += `<div class="card"><h2>👤 Profile &amp; Rules</h2>
@@ -1085,14 +1075,12 @@ function bindViewEvents() {
 
 /* ---------- Admin panel bindings ---------- */
 function bindAdmin(root) {
-  // auth
-  on(root, "loginBtn", async () => {
-    const pw = val("adminPw");
-    const r = await Store.login(pw);
-    if (r.ok) { toast("🔓", "Logged in", "Changes now sync to the database."); await Store.pushNow(S); render(); }
-    else toast("⚠️", "Login failed", r.error || "Wrong password");
+  // account
+  on(root, "logoutBtn", () => {
+    Store.logout();
+    if (Store.isOnline()) { forceCloseModal(); showAuth(); }
+    else render();
   });
-  on(root, "logoutBtn", () => { Store.logout(); toast("🔒", "Logged out", "Editing is now read-only."); render(); });
 
   // settings
   on(root, "saveSettings", () => {
@@ -1301,14 +1289,17 @@ async function enableReminders() {
 }
 
 /* ---------- Modal + Quick Add + Onboarding ---------- */
-function openModal(html) {
+let modalDismissable = true;
+function openModal(html, { dismissable = true } = {}) {
+  modalDismissable = dismissable;
   const root = document.getElementById("modalRoot");
   root.innerHTML = `<div class="modal-overlay" id="modalOverlay"><div class="modal">${html}</div></div>`;
   const overlay = document.getElementById("modalOverlay");
-  overlay.addEventListener("click", e => { if (e.target === overlay) closeModal(); });
+  overlay.addEventListener("click", e => { if (e.target === overlay && modalDismissable) closeModal(); });
   return root.querySelector(".modal");
 }
-function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+function closeModal() { if (modalDismissable) document.getElementById("modalRoot").innerHTML = ""; }
+function forceCloseModal() { document.getElementById("modalRoot").innerHTML = ""; }
 function modalOpen() { return document.getElementById("modalRoot").children.length > 0; }
 
 const qaForms = {
@@ -1377,23 +1368,62 @@ function openOnboarding() {
   };
 }
 
-/* ---------- Global controls ---------- */
-async function setup() {
-  await Store.init();
+/* ---------- Auth screen (multi-user) ---------- */
+function showAuth() {
+  let mode = "login";
+  const openIt = () => {
+    const modal = openModal(`
+      <h2>${mode === "login" ? "🔐 Log in" : "✨ Create your account"}</h2>
+      <div class="sub">Your data is private to your account and stored on the server.</div>
+      <div class="field"><label>Username</label><input class="input" id="authUser" autocomplete="username" placeholder="username"></div>
+      <div class="field"><label>Password</label><input class="input" id="authPass" type="password" autocomplete="${mode === "login" ? "current-password" : "new-password"}" placeholder="••••••"></div>
+      <div id="authErr" class="down" style="font-size:12px;min-height:16px;margin-bottom:6px"></div>
+      <button class="btn" id="authSubmit" style="width:100%">${mode === "login" ? "Log in" : "Create account"}</button>
+      <p class="muted" style="font-size:12px;margin-top:12px;text-align:center">
+        ${mode === "login" ? "New here?" : "Already have an account?"}
+        <a href="#" id="authToggle" style="color:var(--accent-2)">${mode === "login" ? "Create an account" : "Log in"}</a>
+      </p>
+    `, { dismissable: false });
+    modal.querySelector("#authToggle").onclick = e => { e.preventDefault(); mode = mode === "login" ? "register" : "login"; openIt(); };
+    const submit = async () => {
+      const u = val("authUser"), pw = document.getElementById("authPass").value;
+      const errEl = document.getElementById("authErr");
+      if (!u || !pw) { errEl.textContent = "Enter a username and password."; return; }
+      const r = mode === "login" ? await Store.login(u, pw) : await Store.register(u, pw);
+      if (r.ok) { forceCloseModal(); await startApp(); }
+      else errEl.textContent = r.error;
+    };
+    document.getElementById("authSubmit").onclick = submit;
+    modal.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+    document.getElementById("authUser").focus();
+  };
+  openIt();
+}
+
+/* ---------- App boot ---------- */
+async function startApp() {
   S = await Store.load(SEED);
+  if (S === null) { showAuth(); return; }   // login required
   normalizeState();
   applyTheme(S.settings.theme);
+  checkAchievements();
+  render();
+  scheduleReminders();
+  if (!S.profile.onboarded) openOnboarding();
+}
 
+/* ---------- Global controls ---------- */
+function bindGlobalControls() {
   window.addEventListener("lifeos:auth-expired", () => {
-    toast("🔒", "Session expired", "Log in again to keep syncing.");
-    if (currentView === "admin") render();
+    toast("🔒", "Session expired", "Please log in again.");
+    showAuth();
   });
 
   document.querySelectorAll(".nav-btn").forEach(b => b.onclick = () => switchView(b.dataset.view));
   document.getElementById("themeBtn").onclick = toggleTheme;
   document.getElementById("fab").onclick = () => openQuickAdd();
 
-  // keyboard: N = quick add, Esc = close modal
+  // keyboard: N = quick add, Esc = close (dismissable) modal
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") { closeModal(); return; }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
@@ -1412,21 +1442,23 @@ async function setup() {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try { S = JSON.parse(reader.result); saveState(); render(); toast("✅", "Imported", "Your data was restored."); }
+      try { S = JSON.parse(reader.result); normalizeState(); saveState(); render(); toast("✅", "Imported", "Your data was restored."); }
       catch { toast("⚠️", "Import failed", "Invalid file."); }
     };
     reader.readAsText(file);
   };
   document.getElementById("resetBtn").onclick = () => {
-    if (confirm("Reset everything to defaults? This erases your saved progress.")) {
-      S = structuredClone(SEED); saveState(); switchView("overview");
+    if (confirm("Reset your dashboard to defaults? This erases your saved progress.")) {
+      S = structuredClone(SEED); normalizeState(); saveState(); switchView("overview");
     }
   };
+}
 
-  checkAchievements();
-  render();
-  scheduleReminders();
-  if (!S.profile.onboarded) openOnboarding();
+async function setup() {
+  await Store.init();
+  bindGlobalControls();
+  if (Store.needsAuth()) { showAuth(); return; }   // online + not logged in
+  await startApp();
 }
 
 document.addEventListener("DOMContentLoaded", setup);

@@ -3,9 +3,9 @@
 A gamified dashboard for running your personal life: discipline & consistency
 tracking, habits, tasks, calendar, finance, health, and notes — with an XP/level
 system, streaks, achievements, an **Admin panel** for full control, and an
-optional **Node + SQLite backend** so your data lives on a server, not just one
-browser. It's a **PWA** (installable on your phone, works offline) with **light
-and dark themes**.
+optional **multi-user Node + SQLite backend** so each person has their own private,
+account-protected dashboard that lives on a server, not just one browser. It's a
+**PWA** (installable on your phone, works offline) with **light and dark themes**.
 
 ## Two ways to run it
 
@@ -19,7 +19,8 @@ open public/index.html       # macOS
 # or double-click public/index.html
 ```
 
-In offline mode the Admin panel needs no login.
+Offline mode is a single local profile — no accounts needed. Multi-user accounts
+apply to server mode.
 
 **Install as an app:** when served over http (server or Docker mode), open it in
 Chrome/Edge/Safari and choose *Install* / *Add to Home Screen*. It runs
@@ -28,12 +29,14 @@ with the Theme button in the sidebar.
 
 ### 2. With the server + database (recommended)
 
-Stores everything in a SQLite database and protects edits with an admin login.
+**Multi-user:** each person creates an account (username + password, hashed with
+scrypt) and gets their own private dashboard stored in SQLite. Data is isolated
+per account and survives server restarts.
 
 ```bash
 npm install
 npm start
-# open http://localhost:3000
+# open http://localhost:3000 → create an account, then log in
 ```
 
 Configure with environment variables:
@@ -41,20 +44,20 @@ Configure with environment variables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `3000` | Port to serve on |
-| `ADMIN_PASSWORD` | `admin` | Password for the Admin panel login |
 | `LIFEOS_DATA_DIR` | `./data` | Where the SQLite file is stored |
+| `ALLOW_REGISTRATION` | `true` | Set to `false` to close sign-ups after your accounts exist |
 
 ```bash
-ADMIN_PASSWORD=mySecret PORT=8080 npm start
+ALLOW_REGISTRATION=false PORT=8080 npm start
 ```
 
-The app auto-detects which mode it's in and shows the status in **Admin → Backend**.
+The app auto-detects online vs. offline; sign-in status shows in **Admin → Account**.
 
 ### 3. Docker
 
 ```bash
 docker build -t life-os .
-docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
+docker run -p 3000:3000 -v life-os-data:/data life-os
 # open http://localhost:3000  (database persists in the life-os-data volume)
 ```
 
@@ -72,7 +75,7 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 | 📝 **Notes** | Quick journal / scratchpad |
 | 📊 **Analytics** | Charts: XP per day, discipline trend, mood & energy trend, and 30-day habit consistency |
 | 🏆 **Achievements** | Unlockable badges for milestones |
-| ⚙️ **Admin** | Login, edit profile/currency/income, tune XP rules & streak threshold, full add/edit/delete for habits (incl. weekday cadence), weekly goals, tasks (incl. priority), budgets, health metrics (incl. direction), events & notes, export backup, wipe & reset |
+| ⚙️ **Admin** | Account (sign in/out), edit profile/currency/income, tune XP rules & streak threshold, full add/edit/delete for habits (incl. weekday cadence), weekly goals, tasks (incl. priority), budgets, health metrics (incl. direction), events & notes, calendar sync, reminders, export backup, wipe & reset |
 
 ## Quick capture & onboarding
 
@@ -91,11 +94,12 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| `GET` | `/api/health` | — | `{ ok, hasState }` |
-| `POST` | `/api/login` | — | Body `{ password }` → `{ token }` |
-| `GET` | `/api/state` | — | Full dashboard state (`204` if none yet) |
-| `PUT` | `/api/state` | Bearer | Save full state |
-| `DELETE` | `/api/state` | Bearer | Wipe state |
+| `GET` | `/api/health` | — | `{ ok, users, registrationOpen }` |
+| `POST` | `/api/register` | — | Body `{ username, password }` → `{ token, username }` |
+| `POST` | `/api/login` | — | Body `{ username, password }` → `{ token, username }` |
+| `GET` | `/api/state` | Bearer | The signed-in user's state (`204` if none yet) |
+| `PUT` | `/api/state` | Bearer | Save the user's state |
+| `DELETE` | `/api/state` | Bearer | Wipe the user's state |
 | `POST` | `/api/collection/:name` | Bearer | Create one item in a collection (id auto-assigned) |
 | `PUT` | `/api/collection/:name/:id` | Bearer | Modify fields of one item |
 | `DELETE` | `/api/collection/:name/:id` | Bearer | Delete one item |

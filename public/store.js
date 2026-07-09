@@ -1,32 +1,31 @@
 /* ===== Life OS — Storage & sync layer =====
- * Works in two modes automatically:
- *   • Server mode  — when served by the Node backend, state lives in SQLite.
- *                    Writes require admin login (bearer token).
- *   • Offline mode — when opened directly as a file:// , falls back to
- *                    localStorage. Admin editing is always allowed offline.
+ * Two modes, auto-detected:
+ *   • Server mode  — served by the Node backend. Multi-user: each account has
+ *                    its own private state in SQLite. A bearer token identifies
+ *                    the logged-in user. State is NOT cached to localStorage in
+ *                    this mode, so accounts never leak on a shared browser.
+ *   • Offline mode — opened as a file:// with no backend. Single local profile
+ *                    in localStorage, no accounts needed.
  */
 const Store = (() => {
   const LS_KEY = "lifeos.state";
   const TOKEN_KEY = "lifeos.token";
-  let online = false;          // is the backend reachable?
+  const USER_KEY = "lifeos.username";
+  let online = false;
   let token = localStorage.getItem(TOKEN_KEY) || null;
+  let username = localStorage.getItem(USER_KEY) || null;
   let saveTimer = null;
-  let pendingState = null;   // last unsynced state, flushed on page hide
+  let pendingState = null;
 
   async function api(path, opts = {}) {
     const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
     if (token) headers.Authorization = "Bearer " + token;
-    const res = await fetch(path, Object.assign({}, opts, { headers }));
-    return res;
+    return fetch(path, Object.assign({}, opts, { headers }));
   }
 
   async function init() {
-    try {
-      const res = await fetch("/api/health");
-      online = res.ok;
-    } catch { online = false; }
-    // Flush any pending debounced save before the page goes away, so the last
-    // edit is never lost on reload/close. keepalive lets it complete post-unload.
+    try { online = (await fetch("/api/health")).ok; } catch { online = false; }
+    // Flush pending debounced save before the page unloads (keepalive).
     const flush = () => {
       if (!online || !token || !pendingState) return;
       try {
@@ -44,41 +43,59 @@ const Store = (() => {
   }
 
   function isOnline() { return online; }
-  function isAuthed() { return !online || !!token; }   // offline = always allowed
+  function isAuthed() { return online ? !!token : true; }   // offline = no auth needed
+  function needsAuth() { return online && !token; }          // show the login screen
+  function getUsername() { return username; }
 
-  async function login(password) {
-    if (!online) return { ok: true };                  // no auth needed offline
-    const res = await api("/api/login", { method: "POST", body: JSON.stringify({ password }) });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); return { ok: false, error: e.error || "Login failed" }; }
-    const data = await res.json();
-    token = data.token;
-    localStorage.setItem(TOKEN_KEY, token);
-    return { ok: true };
+  async function health() {
+    try { return await (await fetch("/api/health")).json(); } catch { return { ok: false }; }
   }
 
-  function logout() { token = null; localStorage.removeItem(TOKEN_KEY); }
+  async function authCall(kind, user, pass) {
+    const res = await api("/api/" + kind, { method: "POST", body: JSON.stringify({ username: user, password: pass }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error || "Failed" };
+    token = data.token; username = data.username;
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, username);
+    return { ok: true, username };
+  }
+  const login = (user, pass) => authCall("login", user, pass);
+  const register = (user, pass) => authCall("register", user, pass);
 
-  // Load state: server first (if online), then localStorage, then seed.
+  function logout() {
+    token = null; username = null;
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(LS_KEY);   // drop cached state so nothing leaks
+  }
+
+  // Load this user's state. Returns the state object, or null if a login is
+  // required (online but no token). New accounts (204) get the seed.
   async function load(seed) {
     if (online) {
+      if (!token) return null;
       try {
         const res = await api("/api/state");
         if (res.status === 200) return await res.json();
-        // 204 = server has no state yet; seed it below from local or defaults.
-      } catch { /* fall through */ }
+        if (res.status === 204) return structuredClone(seed);   // fresh account
+        if (res.status === 401) { logout(); return null; }
+      } catch { /* fall through to offline cache */ }
     }
     const raw = localStorage.getItem(LS_KEY);
     if (raw) { try { return JSON.parse(raw); } catch {} }
     return structuredClone(seed);
   }
 
-  // Save: always cache to localStorage; debounce-push to server when authed.
+  // Save. Online: push to the server (debounced), never to localStorage (avoids
+  // cross-account leakage). Offline: cache to localStorage.
   function save(state) {
-    localStorage.setItem(LS_KEY, JSON.stringify(state));
     if (online && token) {
       pendingState = state;
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => pushNow(state), 600);
+    } else if (!online) {
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
     }
   }
 
@@ -87,10 +104,9 @@ const Store = (() => {
     try {
       const res = await api("/api/state", { method: "PUT", body: JSON.stringify(state) });
       if (res.status === 401) { logout(); window.dispatchEvent(new Event("lifeos:auth-expired")); }
-    } catch { /* offline blip — localStorage still has it */ }
+    } catch { /* transient — will retry on next save */ }
   }
 
-  // Trigger a server-side Google Calendar (ICS) sync.
   async function syncCalendar(url) {
     if (!online) return { ok: false, error: "Calendar sync needs the server running." };
     if (!token) return { ok: false, error: "Log in first to sync." };
@@ -107,5 +123,8 @@ const Store = (() => {
     localStorage.removeItem(LS_KEY);
   }
 
-  return { init, isOnline, isAuthed, login, logout, load, save, pushNow, wipeServer, syncCalendar };
+  return {
+    init, isOnline, isAuthed, needsAuth, getUsername, health,
+    login, register, logout, load, save, pushNow, wipeServer, syncCalendar,
+  };
 })();
