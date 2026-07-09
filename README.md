@@ -22,6 +22,9 @@ open public/index.html       # macOS
 Offline mode is a single local profile — no accounts needed. Multi-user accounts
 apply to server mode.
 
+**One-file build:** run `npm run build` to bundle everything into a single
+self-contained `life-os.html` you can double-click or share — no server, works offline.
+
 **Install as an app:** when served over http (server or Docker mode), open it in
 Chrome/Edge/Safari and choose *Install* / *Add to Home Screen*. It runs
 full-screen and works offline thanks to the service worker. Toggle **light/dark**
