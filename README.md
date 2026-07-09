@@ -31,7 +31,8 @@ with the Theme button in the sidebar.
 
 **Multi-user:** each person creates an account (username + password, hashed with
 scrypt) and gets their own private dashboard stored in SQLite. Data is isolated
-per account and survives server restarts.
+per account and survives server restarts. Sessions are persisted too, so you
+**stay logged in for 30 days**, even across restarts; logging out ends the session.
 
 ```bash
 npm install
@@ -97,6 +98,7 @@ docker run -p 3000:3000 -v life-os-data:/data life-os
 | `GET` | `/api/health` | — | `{ ok, users, registrationOpen }` |
 | `POST` | `/api/register` | — | Body `{ username, password }` → `{ token, username }` |
 | `POST` | `/api/login` | — | Body `{ username, password }` → `{ token, username }` |
+| `POST` | `/api/logout` | Bearer | End the current session |
 | `GET` | `/api/state` | Bearer | The signed-in user's state (`204` if none yet) |
 | `PUT` | `/api/state` | Bearer | Save the user's state |
 | `DELETE` | `/api/state` | Bearer | Wipe the user's state |

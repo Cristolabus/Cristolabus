@@ -64,6 +64,7 @@ const Store = (() => {
   const register = (user, pass) => authCall("register", user, pass);
 
   function logout() {
+    if (online && token) { try { api("/api/logout", { method: "POST" }); } catch { /* best effort */ } }
     token = null; username = null;
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);

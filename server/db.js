@@ -24,6 +24,12 @@ db.exec(`
     json          TEXT NOT NULL,
     updated_at    TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS sessions (
+    token         TEXT PRIMARY KEY,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at    TEXT NOT NULL,
+    expires_at    TEXT NOT NULL
+  );
 `);
 
 /* ---- Password hashing (scrypt, no external deps) ---- */
@@ -53,6 +59,29 @@ function userCount() {
   return db.prepare("SELECT COUNT(*) AS n FROM users").get().n;
 }
 
+/* ---- Sessions (persisted so logins survive restarts) ---- */
+function createSession(token, userId, ttlMs) {
+  const now = Date.now();
+  db.prepare("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
+    .run(token, userId, new Date(now).toISOString(), new Date(now + ttlMs).toISOString());
+}
+function getSessionUser(token) {
+  if (!token) return null;
+  const row = db.prepare("SELECT user_id, expires_at FROM sessions WHERE token = ?").get(token);
+  if (!row) return null;
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+    return null;
+  }
+  return row.user_id;
+}
+function deleteSession(token) {
+  db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+}
+function cleanupSessions() {
+  db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(new Date().toISOString());
+}
+
 /* ---- Per-user state ---- */
 function getState(userId) {
   const row = db.prepare("SELECT json FROM user_state WHERE user_id = ?").get(userId);
@@ -74,5 +103,6 @@ function clearState(userId) {
 module.exports = {
   DATA_DIR, hashPassword, verifyPassword,
   createUser, getUserByName, userCount,
+  createSession, getSessionUser, deleteSession, cleanupSessions,
   getState, saveState, clearState,
 };

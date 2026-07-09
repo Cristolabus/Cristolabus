@@ -26,19 +26,24 @@ const ALLOW_REGISTRATION = process.env.ALLOW_REGISTRATION !== "false";
 
 app.use(express.json({ limit: "5mb" }));
 
-// In-memory token -> userId map (cleared on restart; users just log in again).
-const tokens = new Map();
+// Sessions are persisted in SQLite, so logins survive server restarts.
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;   // 30 days
+db.cleanupSessions();
 function issueToken(userId) {
   const t = crypto.randomBytes(24).toString("hex");
-  tokens.set(t, userId);
+  db.createSession(t, userId, SESSION_TTL);
   return t;
 }
-function requireAuth(req, res, next) {
+function tokenFrom(req) {
   const auth = req.headers.authorization || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  const userId = tokens.get(token);
+  return auth.startsWith("Bearer ") ? auth.slice(7) : "";
+}
+function requireAuth(req, res, next) {
+  const token = tokenFrom(req);
+  const userId = db.getSessionUser(token);
   if (!userId) return res.status(401).json({ error: "Unauthorized — please log in." });
   req.userId = userId;
+  req.token = token;
   next();
 }
 
@@ -70,6 +75,11 @@ app.post("/api/login", (req, res) => {
 
 app.get("/api/me", requireAuth, (req, res) => {
   res.json({ userId: req.userId });
+});
+
+app.post("/api/logout", requireAuth, (req, res) => {
+  db.deleteSession(req.token);
+  res.json({ ok: true });
 });
 
 // ---- Per-user state ----
