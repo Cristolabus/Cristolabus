@@ -1300,6 +1300,83 @@ async function enableReminders() {
   } else { toast("⚠️", "Blocked", "Allow notifications in your browser settings."); }
 }
 
+/* ---------- Modal + Quick Add + Onboarding ---------- */
+function openModal(html) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = `<div class="modal-overlay" id="modalOverlay"><div class="modal">${html}</div></div>`;
+  const overlay = document.getElementById("modalOverlay");
+  overlay.addEventListener("click", e => { if (e.target === overlay) closeModal(); });
+  return root.querySelector(".modal");
+}
+function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+function modalOpen() { return document.getElementById("modalRoot").children.length > 0; }
+
+const qaForms = {
+  task: () => `<input class="input" id="qaT" placeholder="Task title…">
+    <div class="row" style="margin-top:8px">
+      <select class="input" id="qaTP"><option value="high">High</option><option value="med" selected>Medium</option><option value="low">Low</option></select>
+      <input class="input" id="qaTD" type="date" title="Due date">
+    </div>`,
+  note: () => `<textarea class="input" id="qaN" rows="4" placeholder="Write a note…"></textarea>`,
+  event: () => `<input class="input" id="qaE" placeholder="Event title…">
+    <div class="row" style="margin-top:8px"><input class="input" id="qaED" type="date" value="${todayISO()}"><input class="input" id="qaET" type="time" value="09:00"></div>`,
+  goal: () => `<input class="input" id="qaG" placeholder="Goal name…">
+    <div class="row" style="margin-top:8px"><input class="input" id="qaGT" type="number" placeholder="Target"><input class="input" id="qaGU" placeholder="unit (km, h…)"></div>`,
+};
+const qaSubmit = {
+  task: () => { const v = val("qaT"); if (!v) return false; S.tasks.unshift({ id: uid(), title: v, priority: document.getElementById("qaTP").value, done: false, xp: 10, repeat: "none", due: val("qaTD"), lastDone: "" }); saveState(); toast("✅", "Task added", v); return true; },
+  note: () => { const v = document.getElementById("qaN").value.trim(); if (!v) return false; S.notes.push({ id: uid(), date: todayISO(), body: v }); addXP(S.settings.noteXP ?? 5, "Captured a note"); saveState(); toast("📝", "Note saved", ""); return true; },
+  event: () => { const v = val("qaE"); if (!v) return false; S.events.push({ id: uid(), title: v, date: val("qaED"), time: val("qaET"), loc: "" }); saveState(); toast("📅", "Event added", v); return true; },
+  goal: () => { const v = val("qaG"), t = num("qaGT", 0); if (!v || !t) return false; S.goals.push({ id: uid(), name: v, ico: "🎯", target: t, unit: val("qaGU"), progress: 0, weekStart: mondayISO(), completedAwarded: false }); saveState(); toast("🎯", "Goal added", v); return true; },
+};
+function openQuickAdd(initial) {
+  let type = initial || "task";
+  const modal = openModal(`
+    <h2>⚡ Quick Add <button class="modal-close" data-close>×</button></h2>
+    <div class="seg" id="qaSeg">
+      <button data-qa="task">✅ Task</button><button data-qa="note">📝 Note</button>
+      <button data-qa="event">📅 Event</button><button data-qa="goal">🎯 Goal</button>
+    </div>
+    <div id="qaBody"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn" id="qaSave">Add</button></div>
+  `);
+  const renderBody = () => {
+    modal.querySelectorAll("[data-qa]").forEach(b => b.classList.toggle("on", b.dataset.qa === type));
+    document.getElementById("qaBody").innerHTML = qaForms[type]();
+    const f = modal.querySelector("#qaBody input, #qaBody textarea"); if (f) f.focus();
+  };
+  modal.querySelectorAll("[data-qa]").forEach(b => b.onclick = () => { type = b.dataset.qa; renderBody(); });
+  modal.querySelector("[data-close]").onclick = closeModal;
+  document.getElementById("qaSave").onclick = () => { if (qaSubmit[type]()) { closeModal(); render(); } };
+  modal.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); document.getElementById("qaSave").click(); } });
+  renderBody();
+}
+function openOnboarding() {
+  const avatars = ["🧗", "🚀", "🦊", "🌱", "🧠", "⭐", "🐺", "🎯", "🔥", "🦉"];
+  let avatar = S.profile.avatar || avatars[0], theme = S.settings.theme || "dark";
+  const modal = openModal(`
+    <h2>👋 Welcome to Life OS</h2>
+    <div class="sub">Let's make it yours — you can change all of this later in Admin.</div>
+    <div class="field"><label>Your name</label><input class="input" id="obName" value="${esc(S.profile.name || "")}" placeholder="Your name"></div>
+    <div class="field"><label>Pick an avatar</label><div class="avatar-pick" id="obAvatars">
+      ${avatars.map((a, i) => `<button data-av="${a}" class="${(S.profile.avatar === a || (i === 0 && !S.profile.avatar)) ? "on" : ""}">${a}</button>`).join("")}
+    </div></div>
+    <div class="field"><label>Theme</label><div class="seg" id="obTheme">
+      <button data-th="dark" class="${theme !== "light" ? "on" : ""}">🌙 Dark</button>
+      <button data-th="light" class="${theme === "light" ? "on" : ""}">☀️ Light</button>
+    </div></div>
+    <button class="btn" id="obStart" style="width:100%;margin-top:6px">Get started →</button>
+  `);
+  modal.querySelectorAll("[data-av]").forEach(b => b.onclick = () => { avatar = b.dataset.av; modal.querySelectorAll("[data-av]").forEach(x => x.classList.toggle("on", x === b)); });
+  modal.querySelectorAll("[data-th]").forEach(b => b.onclick = () => { theme = b.dataset.th; modal.querySelectorAll("[data-th]").forEach(x => x.classList.toggle("on", x === b)); applyTheme(theme); });
+  document.getElementById("obStart").onclick = () => {
+    S.profile.name = val("obName") || S.profile.name || "Friend";
+    S.profile.avatar = avatar; S.settings.theme = theme; S.profile.onboarded = true;
+    applyTheme(theme); saveState(); closeModal(); render();
+    toast("🎉", "Welcome, " + S.profile.name.split(" ")[0] + "!", "Your dashboard is ready.");
+  };
+}
+
 /* ---------- Global controls ---------- */
 async function setup() {
   await Store.init();
@@ -1314,6 +1391,14 @@ async function setup() {
 
   document.querySelectorAll(".nav-btn").forEach(b => b.onclick = () => switchView(b.dataset.view));
   document.getElementById("themeBtn").onclick = toggleTheme;
+  document.getElementById("fab").onclick = () => openQuickAdd();
+
+  // keyboard: N = quick add, Esc = close modal
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { closeModal(); return; }
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
+    if (!typing && !modalOpen() && (e.key === "n" || e.key === "N")) { e.preventDefault(); openQuickAdd(); }
+  });
 
   document.getElementById("exportBtn").onclick = () => {
     const blob = new Blob([JSON.stringify(S, null, 2)], { type: "application/json" });
@@ -1341,6 +1426,7 @@ async function setup() {
   checkAchievements();
   render();
   scheduleReminders();
+  if (!S.profile.onboarded) openOnboarding();
 }
 
 document.addEventListener("DOMContentLoaded", setup);

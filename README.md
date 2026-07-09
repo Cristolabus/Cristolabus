@@ -74,6 +74,12 @@ docker run -p 3000:3000 -v life-os-data:/data -e ADMIN_PASSWORD=mySecret life-os
 | 🏆 **Achievements** | Unlockable badges for milestones |
 | ⚙️ **Admin** | Login, edit profile/currency/income, tune XP rules & streak threshold, full add/edit/delete for habits (incl. weekday cadence), weekly goals, tasks (incl. priority), budgets, health metrics (incl. direction), events & notes, export backup, wipe & reset |
 
+## Quick capture & onboarding
+
+- **First-run onboarding** lets you set your name, avatar, and theme.
+- A floating **＋ button** (or press **N** anywhere) opens **Quick Add** — capture a
+  task, note, event, or goal from any screen in seconds. **Esc** closes any dialog.
+
 ## The gamification system
 
 - **XP & Levels** — every habit, task, note, and met goal awards XP. Fill the bar to level up and earn new titles (Novice → Apprentice → … → Legend). All XP values are editable in Admin.
